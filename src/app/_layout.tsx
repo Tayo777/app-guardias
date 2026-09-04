@@ -1,44 +1,52 @@
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
 import { SQLiteProvider } from 'expo-sqlite';
-import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { StyleSheet, View } from 'react-native';
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { BannerRed } from '@/components/banner-red';
+import { Paleta } from '@/constants/theme';
 import { DATABASE_NAME } from '@/lib/config';
 import { migrarBaseDeDatos } from '@/lib/db';
-import { SesionProvider, useSesion } from '@/lib/session';
-
-SplashScreen.preventAutoHideAsync();
+import { useAuthStore } from '@/store/auth';
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
+    <ThemeProvider value={DarkTheme}>
+      <StatusBar style="light" />
       <SQLiteProvider databaseName={DATABASE_NAME} onInit={migrarBaseDeDatos}>
-        <SesionProvider>
+        <View style={styles.raiz}>
+          <BannerRed />
           <NavegadorRaiz />
-        </SesionProvider>
+        </View>
       </SQLiteProvider>
     </ThemeProvider>
   );
 }
 
 function NavegadorRaiz() {
-  const { sesion, cargando } = useSesion();
+  const token = useAuthStore((estado) => estado.token);
+  const hidratado = useAuthStore((estado) => estado.hidratado);
 
-  if (cargando) return null;
+  // Sin esto se ve un parpadeo del login antes de leer la sesion guardada.
+  if (!hidratado) return <View style={styles.raiz} />;
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Protected guard={!!sesion}>
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: Paleta.fondo },
+      }}>
+      <Stack.Protected guard={!!token}>
         <Stack.Screen name="(guardia)" />
       </Stack.Protected>
 
-      <Stack.Protected guard={!sesion}>
+      <Stack.Protected guard={!token}>
         <Stack.Screen name="login" />
       </Stack.Protected>
     </Stack>
   );
 }
+
+const styles = StyleSheet.create({
+  raiz: { flex: 1, backgroundColor: Paleta.fondo },
+});

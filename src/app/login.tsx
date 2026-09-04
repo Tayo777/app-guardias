@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -5,19 +6,16 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  Text,
   TextInput,
+  View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { MaxContentWidth, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
-import { useSesion } from '@/lib/session';
+import { MaxContentWidth, Paleta, Spacing } from '@/constants/theme';
+import { useAuthStore } from '@/store/auth';
 
 export default function LoginScreen() {
-  const theme = useTheme();
-  const { iniciarSesion } = useSesion();
+  const iniciarSesion = useAuthStore((estado) => estado.iniciarSesion);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -39,100 +37,121 @@ export default function LoginScreen() {
   }
 
   return (
-    <ThemedView style={styles.container}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <SafeAreaView style={styles.safeArea}>
-          <ThemedView style={styles.encabezado}>
-            <ThemedText type="subtitle">Control de acceso</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              Ingresa con tu cuenta de guardia
-            </ThemedText>
-          </ThemedView>
+    <KeyboardAvoidingView
+      style={styles.raiz}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.contenido}>
+        <View style={styles.marca}>
+          <View style={styles.logo}>
+            <Ionicons name="shield-checkmark" size={28} color={Paleta.texto} />
+          </View>
+          <Text style={styles.titulo}>Control de Acceso</Text>
+          <Text style={styles.subtitulo}>Ingresá con tu cuenta de guardia</Text>
+        </View>
 
-          <ThemedView style={styles.formulario}>
-            <TextInput
-              style={[
-                styles.input,
-                { backgroundColor: theme.backgroundElement, color: theme.text },
-              ]}
-              placeholder="Email"
-              placeholderTextColor={theme.textSecondary}
-              autoCapitalize="none"
-              autoComplete="email"
-              keyboardType="email-address"
-              value={email}
-              onChangeText={setEmail}
-            />
-            <TextInput
-              style={[
-                styles.input,
-                { backgroundColor: theme.backgroundElement, color: theme.text },
-              ]}
-              placeholder="Contrasena"
-              placeholderTextColor={theme.textSecondary}
-              autoCapitalize="none"
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-              onSubmitEditing={enviar}
-            />
+        <View style={styles.formulario}>
+          <TextInput
+            style={styles.input}
+            placeholder="Email"
+            placeholderTextColor={Paleta.textoSuave}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="email"
+            keyboardType="email-address"
+            value={email}
+            onChangeText={setEmail}
+            editable={!enviando}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Contraseña"
+            placeholderTextColor={Paleta.textoSuave}
+            autoCapitalize="none"
+            secureTextEntry
+            value={password}
+            onChangeText={setPassword}
+            onSubmitEditing={enviar}
+            editable={!enviando}
+          />
 
-            {error && (
-              <ThemedText type="small" style={styles.error}>
-                {error}
-              </ThemedText>
+          {error && (
+            <View style={styles.cajaError}>
+              <Ionicons name="alert-circle" size={16} color={Paleta.error} />
+              <Text style={styles.textoError}>{error}</Text>
+            </View>
+          )}
+
+          <Pressable
+            accessibilityRole="button"
+            disabled={!puedeEnviar}
+            onPress={enviar}
+            style={({ pressed }) => [
+              styles.boton,
+              { opacity: !puedeEnviar ? 0.4 : pressed ? 0.85 : 1 },
+            ]}>
+            {enviando ? (
+              <ActivityIndicator color="#ffffff" />
+            ) : (
+              <Text style={styles.textoBoton}>Ingresar</Text>
             )}
-
-            <Pressable
-              accessibilityRole="button"
-              disabled={!puedeEnviar}
-              onPress={enviar}
-              style={[styles.boton, { opacity: puedeEnviar ? 1 : 0.5 }]}>
-              {enviando ? (
-                <ActivityIndicator color="#ffffff" />
-              ) : (
-                <ThemedText type="smallBold" style={styles.botonTexto}>
-                  Ingresar
-                </ThemedText>
-              )}
-            </Pressable>
-          </ThemedView>
-        </SafeAreaView>
-      </KeyboardAvoidingView>
-    </ThemedView>
+          </Pressable>
+        </View>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  flex: { flex: 1 },
-  safeArea: {
+  raiz: { flex: 1, backgroundColor: Paleta.fondo },
+  contenido: {
     flex: 1,
     justifyContent: 'center',
-    gap: Spacing.five,
+    gap: Spacing.six,
     paddingHorizontal: Spacing.four,
-    maxWidth: MaxContentWidth,
     width: '100%',
+    maxWidth: MaxContentWidth,
     alignSelf: 'center',
   },
-  encabezado: { gap: Spacing.two },
+  marca: { alignItems: 'center', gap: Spacing.two },
+  logo: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: Paleta.superficie,
+    borderWidth: 1,
+    borderColor: Paleta.borde,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.two,
+  },
+  titulo: { color: Paleta.texto, fontSize: 26, fontWeight: '700' },
+  subtitulo: { color: Paleta.textoSuave, fontSize: 14 },
   formulario: { gap: Spacing.three },
   input: {
-    borderRadius: Spacing.three,
+    backgroundColor: Paleta.superficie,
+    borderWidth: 1,
+    borderColor: Paleta.borde,
+    borderRadius: 14,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     fontSize: 16,
+    color: Paleta.texto,
   },
+  cajaError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.one,
+  },
+  textoError: { color: Paleta.error, fontSize: 13, flex: 1 },
   boton: {
-    backgroundColor: '#208AEF',
-    borderRadius: Spacing.three,
+    backgroundColor: Paleta.primario,
+    borderRadius: 14,
     paddingVertical: Spacing.three,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 48,
+    minHeight: 52,
+    marginTop: Spacing.two,
   },
-  botonTexto: { color: '#ffffff' },
-  error: { color: '#dc2626' },
+  textoBoton: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
 });

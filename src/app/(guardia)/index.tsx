@@ -1,198 +1,247 @@
-import { Link, useFocusEffect } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { MaxContentWidth, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
-import { obtenerResumen, type Resumen } from '@/lib/db';
-import { useSesion } from '@/lib/session';
-import { descargarEntradas, subirEscaneos } from '@/lib/sync';
+import { Paleta, Spacing } from '@/constants/theme';
+import { buscarTicketPorQr, contarTickets, marcarTicketUsado } from '@/lib/db';
+import type { TicketLocal } from '@/lib/types';
+import { useAuthStore } from '@/store/auth';
 
-export default function PanelScreen() {
-  const theme = useTheme();
+type Resultado =
+  | { tipo: 'valida'; ticket: TicketLocal }
+  | { tipo: 'usada'; ticket: TicketLocal }
+  | { tipo: 'otra_fila'; ticket: TicketLocal }
+  | { tipo: 'inexistente'; codigo: string };
+
+const ESTILO_RESULTADO: Record<Resultado['tipo'], { color: string; titulo: string; icono: 'checkmark-circle' | 'close-circle' | 'warning' }> = {
+  valida: { color: Paleta.exito, titulo: 'ENTRADA VÁLIDA', icono: 'checkmark-circle' },
+  usada: { color: Paleta.error, titulo: 'YA UTILIZADA', icono: 'close-circle' },
+  otra_fila: { color: Paleta.alerta, titulo: 'OTRA FILA', icono: 'warning' },
+  inexistente: { color: Paleta.error, titulo: 'ENTRADA INEXISTENTE', icono: 'close-circle' },
+};
+
+export default function EscanerScreen() {
   const db = useSQLiteContext();
-  const { sesion, cerrarSesion } = useSesion();
-  const fila = sesion?.guardia.fila_asignada ?? 0;
+  const miNumeroDeFila = useAuthStore((estado) => estado.miNumeroDeFila) ?? 0;
 
-  const [resumen, setResumen] = useState<Resumen | null>(null);
-  const [ocupado, setOcupado] = useState<'descarga' | 'subida' | null>(null);
-  const [aviso, setAviso] = useState<{ texto: string; error: boolean } | null>(null);
-
-  const refrescar = useCallback(async () => {
-    setResumen(await obtenerResumen(db, fila));
-  }, [db, fila]);
+  const [permiso, pedirPermiso] = useCameraPermissions();
+  const [resultado, setResultado] = useState<Resultado | null>(null);
+  const [procesando, setProcesando] = useState(false);
+  const [enfocado, setEnfocado] = useState(false);
+  const [sinEntradas, setSinEntradas] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
-      refrescar();
-    }, [refrescar])
+      setEnfocado(true);
+      contarTickets(db).then((cantidad) => setSinEntradas(cantidad === 0));
+      return () => setEnfocado(false);
+    }, [db])
   );
 
-  async function sincronizar(accion: 'descarga' | 'subida') {
-    if (!sesion || ocupado) return;
-    setOcupado(accion);
-    setAviso(null);
+  async function validar(ticket: TicketLocal) {
+    const marcado = await marcarTicketUsado(db, ticket.codigo_qr, miNumeroDeFila);
+    const actualizado = (await buscarTicketPorQr(db, ticket.codigo_qr)) ?? ticket;
+    setResultado({ tipo: marcado ? 'valida' : 'usada', ticket: actualizado });
+  }
+
+  async function alEscanear(codigo: string) {
+    if (procesando || resultado) return;
+    setProcesando(true);
     try {
-      if (accion === 'descarga') {
-        const cantidad = await descargarEntradas(db, sesion.token);
-        setAviso({ texto: `${cantidad} entradas descargadas`, error: false });
+      const ticket = await buscarTicketPorQr(db, codigo);
+      if (!ticket) {
+        setResultado({ tipo: 'inexistente', codigo });
+      } else if (ticket.estado === 'USADA') {
+        setResultado({ tipo: 'usada', ticket });
+      } else if (ticket.fila_asignada !== null && ticket.fila_asignada !== miNumeroDeFila) {
+        setResultado({ tipo: 'otra_fila', ticket });
       } else {
-        const cantidad = await subirEscaneos(db, sesion.token);
-        setAviso({
-          texto: cantidad === 0 ? 'No habia escaneos pendientes' : `${cantidad} escaneos subidos`,
-          error: false,
-        });
+        await validar(ticket);
       }
-      await refrescar();
-    } catch (e) {
-      setAviso({ texto: e instanceof Error ? e.message : 'Fallo la sincronizacion', error: true });
     } finally {
-      setOcupado(null);
+      setProcesando(false);
     }
   }
 
+  if (!permiso) return <View style={styles.raiz} />;
+
+  if (!permiso.granted) {
+    return (
+      <View style={[styles.raiz, styles.centrado]}>
+        <Ionicons name="camera-outline" size={40} color={Paleta.textoSuave} />
+        <Text style={styles.textoPermiso}>
+          Necesitamos acceso a la cámara para escanear los QR de las entradas.
+        </Text>
+        <Pressable accessibilityRole="button" onPress={pedirPermiso} style={styles.botonPrimario}>
+          <Text style={styles.textoBotonPrimario}>Permitir cámara</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ScrollView contentContainerStyle={styles.contenido}>
-          <ThemedView style={styles.encabezado}>
-            <ThemedView style={styles.flex}>
-              <ThemedText type="subtitle">Fila {fila}</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                {sesion?.guardia.nombre ?? sesion?.guardia.email}
-              </ThemedText>
-            </ThemedView>
-            <Pressable accessibilityRole="button" onPress={cerrarSesion}>
-              <ThemedText type="small" themeColor="textSecondary">
-                Salir
-              </ThemedText>
-            </Pressable>
-          </ThemedView>
+    <View style={styles.raiz}>
+      {enfocado && (
+        <CameraView
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+          onBarcodeScanned={resultado ? undefined : ({ data }) => alEscanear(data)}
+        />
+      )}
 
-          <Link href="/escaner" asChild>
-            <Pressable accessibilityRole="button" style={styles.botonPrincipal}>
-              <ThemedText type="smallBold" style={styles.botonPrincipalTexto}>
-                Escanear entrada
-              </ThemedText>
-            </Pressable>
-          </Link>
+      {!resultado && (
+        <View style={styles.guiaContenedor} pointerEvents="none">
+          <View style={styles.guia} />
+          <Text style={styles.guiaTexto}>Apuntá al QR de la entrada</Text>
+        </View>
+      )}
 
-          <ThemedView type="backgroundElement" style={styles.tarjeta}>
-            <Dato etiqueta="Entradas del evento" valor={resumen?.total ?? 0} />
-            <Dato etiqueta="Ya utilizadas" valor={resumen?.usadas ?? 0} />
-            <Dato
-              etiqueta={`Asignadas a mi fila (${fila})`}
-              valor={`${resumen?.mi_fila_usadas ?? 0} / ${resumen?.mi_fila_total ?? 0}`}
-            />
-            <Dato etiqueta="Escaneos sin subir" valor={resumen?.pendientes ?? 0} />
-          </ThemedView>
+      {sinEntradas && !resultado && (
+        <View style={styles.avisoSinDatos}>
+          <Ionicons name="cloud-download-outline" size={16} color={Paleta.alerta} />
+          <Text style={styles.textoAvisoSinDatos}>
+            No hay entradas descargadas. Andá a Mi Fila y tocá Descargar entradas.
+          </Text>
+        </View>
+      )}
 
-          <ThemedView style={styles.acciones}>
-            <BotonSecundario
-              texto="Descargar entradas"
-              cargando={ocupado === 'descarga'}
-              deshabilitado={ocupado !== null}
-              onPress={() => sincronizar('descarga')}
-            />
-            <BotonSecundario
-              texto={
-                resumen?.pendientes
-                  ? `Subir escaneos (${resumen.pendientes})`
-                  : 'Subir escaneos'
-              }
-              cargando={ocupado === 'subida'}
-              deshabilitado={ocupado !== null}
-              onPress={() => sincronizar('subida')}
-            />
-          </ThemedView>
-
-          {aviso && (
-            <ThemedText
-              type="small"
-              style={{ color: aviso.error ? '#dc2626' : theme.textSecondary }}>
-              {aviso.texto}
-            </ThemedText>
-          )}
-
-          {resumen?.ultima_descarga && (
-            <ThemedText type="small" themeColor="textSecondary">
-              Ultima descarga: {new Date(resumen.ultima_descarga).toLocaleString()}
-            </ThemedText>
-          )}
-        </ScrollView>
-      </SafeAreaView>
-    </ThemedView>
+      {resultado && <PanelResultado resultado={resultado} miNumeroDeFila={miNumeroDeFila} onValidar={validar} onCerrar={() => setResultado(null)} />}
+    </View>
   );
 }
 
-function Dato({ etiqueta, valor }: { etiqueta: string; valor: number | string }) {
-  return (
-    <ThemedView type="backgroundElement" style={styles.dato}>
-      <ThemedText type="small" themeColor="textSecondary" style={styles.flex}>
-        {etiqueta}
-      </ThemedText>
-      <ThemedText type="smallBold">{valor}</ThemedText>
-    </ThemedView>
-  );
-}
-
-function BotonSecundario({
-  texto,
-  cargando,
-  deshabilitado,
-  onPress,
+function PanelResultado({
+  resultado,
+  miNumeroDeFila,
+  onValidar,
+  onCerrar,
 }: {
-  texto: string;
-  cargando: boolean;
-  deshabilitado: boolean;
-  onPress: () => void;
+  resultado: Resultado;
+  miNumeroDeFila: number;
+  onValidar: (ticket: TicketLocal) => void;
+  onCerrar: () => void;
 }) {
-  const theme = useTheme();
+  const estilo = ESTILO_RESULTADO[resultado.tipo];
+
   return (
-    <Pressable
-      accessibilityRole="button"
-      disabled={deshabilitado}
-      onPress={onPress}
-      style={[
-        styles.botonSecundario,
-        { backgroundColor: theme.backgroundSelected, opacity: deshabilitado ? 0.5 : 1 },
-      ]}>
-      {cargando ? <ActivityIndicator color={theme.text} /> : <ThemedText type="small">{texto}</ThemedText>}
-    </Pressable>
+    <View style={styles.panelContenedor}>
+      <View style={[styles.panel, { borderColor: estilo.color }]}>
+        <View style={styles.panelEncabezado}>
+          <Ionicons name={estilo.icono} size={26} color={estilo.color} />
+          <Text style={[styles.panelTitulo, { color: estilo.color }]}>{estilo.titulo}</Text>
+        </View>
+
+        {resultado.tipo === 'inexistente' ? (
+          <Text style={styles.panelTexto}>
+            El código {resultado.codigo} no pertenece a este evento.
+          </Text>
+        ) : (
+          <View style={styles.panelDetalle}>
+            <Text style={styles.panelNombre}>
+              {resultado.ticket.nombre_cliente ?? 'Sin nombre'}
+            </Text>
+            <Text style={styles.panelTexto}>
+              {resultado.ticket.tipo_entrada ?? 'Entrada general'}
+              {resultado.ticket.fila_asignada !== null &&
+                `  ·  Fila ${resultado.ticket.fila_asignada}`}
+            </Text>
+            {resultado.tipo === 'usada' && resultado.ticket.usada_at && (
+              <Text style={styles.panelTexto}>
+                Utilizada el {new Date(resultado.ticket.usada_at).toLocaleString()}
+              </Text>
+            )}
+            {resultado.tipo === 'otra_fila' && (
+              <Text style={styles.panelTexto}>
+                Corresponde a la fila {resultado.ticket.fila_asignada}, vos sos la{' '}
+                {miNumeroDeFila}.
+              </Text>
+            )}
+          </View>
+        )}
+
+        <View style={styles.panelAcciones}>
+          {resultado.tipo === 'otra_fila' && (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => onValidar(resultado.ticket)}
+              style={[styles.botonPanel, { backgroundColor: Paleta.alerta }]}>
+              <Text style={styles.textoBotonPanelOscuro}>Validar igual</Text>
+            </Pressable>
+          )}
+          <Pressable accessibilityRole="button" onPress={onCerrar} style={styles.botonPanel}>
+            <Text style={styles.textoBotonPanel}>Escanear siguiente</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  flex: { flex: 1 },
-  safeArea: { flex: 1 },
-  contenido: {
-    gap: Spacing.four,
-    padding: Spacing.four,
-    maxWidth: MaxContentWidth,
-    width: '100%',
-    alignSelf: 'center',
-  },
-  encabezado: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.three },
-  botonPrincipal: {
-    backgroundColor: '#208AEF',
-    borderRadius: Spacing.three,
-    paddingVertical: Spacing.four,
+  raiz: { flex: 1, backgroundColor: '#000000' },
+  centrado: {
+    justifyContent: 'center',
     alignItems: 'center',
+    gap: Spacing.three,
+    padding: Spacing.four,
+    backgroundColor: Paleta.fondo,
   },
-  botonPrincipalTexto: { color: '#ffffff', fontSize: 16 },
-  tarjeta: { borderRadius: Spacing.three, padding: Spacing.three, gap: Spacing.two },
-  dato: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
-  acciones: { gap: Spacing.two },
-  botonSecundario: {
-    borderRadius: Spacing.three,
+  textoPermiso: { color: Paleta.textoSuave, textAlign: 'center', fontSize: 15 },
+  botonPrimario: {
+    backgroundColor: Paleta.primario,
+    borderRadius: 14,
+    paddingVertical: Spacing.three,
+    paddingHorizontal: Spacing.four,
+  },
+  textoBotonPrimario: { color: '#ffffff', fontWeight: '700' },
+  guiaContenedor: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.four },
+  guia: {
+    width: 240,
+    height: 240,
+    borderRadius: 24,
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.9)',
+  },
+  guiaTexto: { color: '#ffffff', fontWeight: '600' },
+  avisoSinDatos: {
+    position: 'absolute',
+    top: Spacing.three,
+    left: Spacing.three,
+    right: Spacing.three,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    backgroundColor: 'rgba(9,9,11,0.92)',
+    borderWidth: 1,
+    borderColor: Paleta.alerta,
+    borderRadius: 12,
+    padding: Spacing.three,
+  },
+  textoAvisoSinDatos: { color: Paleta.texto, fontSize: 13, flex: 1 },
+  panelContenedor: { flex: 1, justifyContent: 'flex-end', padding: Spacing.three },
+  panel: {
+    backgroundColor: Paleta.fondo,
+    borderRadius: 20,
+    borderWidth: 2,
+    padding: Spacing.four,
+    gap: Spacing.three,
+  },
+  panelEncabezado: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  panelTitulo: { fontSize: 18, fontWeight: '800' },
+  panelDetalle: { gap: Spacing.one },
+  panelNombre: { color: Paleta.texto, fontSize: 16, fontWeight: '700' },
+  panelTexto: { color: Paleta.textoSuave, fontSize: 14 },
+  panelAcciones: { gap: Spacing.two },
+  botonPanel: {
+    backgroundColor: Paleta.superficieAlta,
+    borderRadius: 14,
     paddingVertical: Spacing.three,
     alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 44,
   },
+  textoBotonPanel: { color: Paleta.texto, fontWeight: '700' },
+  textoBotonPanelOscuro: { color: '#09090b', fontWeight: '800' },
 });

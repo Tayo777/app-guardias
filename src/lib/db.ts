@@ -68,6 +68,11 @@ export async function guardarDescarga(db: SQLiteDatabase, tickets: TicketRemoto[
   );
 }
 
+export async function contarTickets(db: SQLiteDatabase) {
+  const fila = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM tickets');
+  return fila?.n ?? 0;
+}
+
 export function buscarTicketPorQr(db: SQLiteDatabase, codigoQr: string) {
   return db.getFirstAsync<TicketLocal>('SELECT * FROM tickets WHERE codigo_qr = ?', [codigoQr]);
 }

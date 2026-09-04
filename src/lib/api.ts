@@ -1,5 +1,5 @@
-import { API_BASE_URL } from '@/lib/config';
-import type { Guardia, TicketRemoto } from '@/lib/types';
+import { API_BASE_URL, TIMEOUT_MS } from '@/lib/config';
+import type { Evento, Guardia, TicketRemoto } from '@/lib/types';
 
 export class ApiError extends Error {
   constructor(
@@ -18,6 +18,9 @@ type Opciones = {
 };
 
 async function pedir<T>(ruta: string, { metodo = 'GET', token, cuerpo }: Opciones = {}): Promise<T> {
+  const abortador = new AbortController();
+  const temporizador = setTimeout(() => abortador.abort(), TIMEOUT_MS);
+
   let respuesta: Response;
   try {
     respuesta = await fetch(`${API_BASE_URL}${ruta}`, {
@@ -27,9 +30,12 @@ async function pedir<T>(ruta: string, { metodo = 'GET', token, cuerpo }: Opcione
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo),
+      signal: abortador.signal,
     });
   } catch {
-    throw new ApiError('Sin conexion con el servidor', 0);
+    throw new ApiError(`No se pudo conectar con ${API_BASE_URL}`, 0);
+  } finally {
+    clearTimeout(temporizador);
   }
 
   const texto = await respuesta.text();
@@ -41,9 +47,15 @@ async function pedir<T>(ruta: string, { metodo = 'GET', token, cuerpo }: Opcione
   return datos as T;
 }
 
-/** POST /api/app/login -> { token, guardia: { ..., fila_asignada } } */
+export type RespuestaLogin = {
+  token: string;
+  guardia: Guardia;
+  evento?: Evento | null;
+};
+
+/** POST /api/app/login -> JWT + datos del guardia (incluye su fila_asignada). */
 export function login(email: string, password: string) {
-  return pedir<{ token: string; guardia: Guardia }>('/api/app/login', {
+  return pedir<RespuestaLogin>('/api/app/login', {
     metodo: 'POST',
     cuerpo: { email, password },
   });
