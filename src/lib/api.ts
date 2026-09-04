@@ -53,6 +53,8 @@ export type RespuestaLogin = {
   filaAsignada: number;
   eventoId: number;
   eventoNombre: string;
+  /** Secreto HMAC de ESTE evento, para validar las firmas de los QR sin conexion. */
+  qrSecret: string;
 };
 
 /** POST /api/app/login -> JWT + la fila que le toca cubrir al guardia. */

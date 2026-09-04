@@ -21,12 +21,13 @@ type Resultado =
 const DETALLE_INVALIDO: Record<MotivoInvalido, string> = {
   formato: 'El QR no tiene el formato esperado.',
   firma: 'La firma digital no coincide con el código.',
-  sin_secreto: 'Falta configurar EXPO_PUBLIC_QR_SECRET en la app.',
+  sin_secreto: 'La sesión no tiene el secreto del evento. Cerrá sesión y volvé a ingresar.',
 };
 
 export default function EscanerScreen() {
   const db = useSQLiteContext();
   const miNumeroDeFila = useAuthStore((estado) => estado.miNumeroDeFila) ?? 0;
+  const qrSecret = useAuthStore((estado) => estado.qrSecret);
 
   const [permiso, pedirPermiso] = useCameraPermissions();
   const [resultado, setResultado] = useState<Resultado | null>(null);
@@ -79,7 +80,7 @@ export default function EscanerScreen() {
     if (procesando || resultado) return;
     setProcesando(true);
     try {
-      const lectura = leerQr(dato);
+      const lectura = leerQr(dato, qrSecret);
       if (!lectura.valido) {
         setResultado({ tipo: 'falso', motivo: lectura.motivo });
         return;
