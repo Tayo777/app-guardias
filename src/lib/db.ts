@@ -2,29 +2,49 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import type { TicketLocal, TicketRemoto } from '@/lib/types';
 
-const VERSION_ESQUEMA = 1;
+const VERSION_ESQUEMA = 3;
+
+/**
+ * LIKE de SQLite no ignora acentos ni mayusculas fuera de ASCII: buscar "perez"
+ * no encontraria "Pérez". Se guarda una copia normalizada para buscar sobre ella.
+ */
+function normalizar(texto: string | null) {
+  if (!texto) return '';
+  return texto
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+/** Texto sobre el que corre el buscador: nombre del comprador + numero de entrada. */
+function textoBusqueda(ticket: TicketRemoto) {
+  return normalizar(`${ticket.nombreComprador ?? ''} ${ticket.id}`);
+}
 
 export async function migrarBaseDeDatos(db: SQLiteDatabase) {
   const fila = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   if ((fila?.user_version ?? 0) >= VERSION_ESQUEMA) return;
 
+  // Los esquemas previos usaban id entero. Se recrea la tabla en vez de migrarla:
+  // las entradas son datos derivados que se vuelven a bajar con sync-download.
   await db.execAsync(`
     PRAGMA journal_mode = 'wal';
 
-    CREATE TABLE IF NOT EXISTS tickets (
-      id INTEGER PRIMARY KEY NOT NULL,
-      codigo_qr TEXT NOT NULL UNIQUE,
-      tipo_entrada TEXT,
-      nombre_cliente TEXT,
+    DROP TABLE IF EXISTS tickets;
+
+    CREATE TABLE tickets (
+      id TEXT PRIMARY KEY NOT NULL,
       estado TEXT NOT NULL DEFAULT 'VALIDA',
+      tipo TEXT,
+      nombre_comprador TEXT,
       fila_asignada INTEGER,
       usada_at TEXT,
-      usada_por_fila INTEGER,
-      pendiente_sync INTEGER NOT NULL DEFAULT 0
+      pendiente_sync INTEGER NOT NULL DEFAULT 0,
+      busqueda TEXT
     );
 
-    CREATE INDEX IF NOT EXISTS idx_tickets_codigo_qr ON tickets (codigo_qr);
-    CREATE INDEX IF NOT EXISTS idx_tickets_pendiente ON tickets (pendiente_sync);
+    CREATE INDEX idx_tickets_fila ON tickets (fila_asignada);
+    CREATE INDEX idx_tickets_pendiente ON tickets (pendiente_sync);
 
     CREATE TABLE IF NOT EXISTS meta (
       clave TEXT PRIMARY KEY NOT NULL,
@@ -39,23 +59,23 @@ export async function guardarDescarga(db: SQLiteDatabase, tickets: TicketRemoto[
   await db.withTransactionAsync(async () => {
     for (const ticket of tickets) {
       // Si el ticket tiene un escaneo local sin subir, el estado local gana:
-      // todavia no llego al backend y perderlo dejaria pasar dos veces la entrada.
+      // todavia no llego al backend y pisarlo dejaria pasar dos veces la entrada.
       await db.runAsync(
-        `INSERT INTO tickets (id, codigo_qr, tipo_entrada, nombre_cliente, estado, fila_asignada)
+        `INSERT INTO tickets (id, estado, tipo, nombre_comprador, fila_asignada, busqueda)
          VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
-           codigo_qr = excluded.codigo_qr,
-           tipo_entrada = excluded.tipo_entrada,
-           nombre_cliente = excluded.nombre_cliente,
+           tipo = excluded.tipo,
+           nombre_comprador = excluded.nombre_comprador,
            fila_asignada = excluded.fila_asignada,
+           busqueda = excluded.busqueda,
            estado = CASE WHEN tickets.pendiente_sync = 1 THEN tickets.estado ELSE excluded.estado END`,
         [
           ticket.id,
-          ticket.codigo_qr,
-          ticket.tipo_entrada,
-          ticket.nombre_cliente,
           ticket.estado,
-          ticket.fila_asignada,
+          ticket.tipo,
+          ticket.nombreComprador,
+          ticket.filaAsignada,
+          textoBusqueda(ticket),
         ]
       );
     }
@@ -73,34 +93,43 @@ export async function contarTickets(db: SQLiteDatabase) {
   return fila?.n ?? 0;
 }
 
-export function buscarTicketPorQr(db: SQLiteDatabase, codigoQr: string) {
-  return db.getFirstAsync<TicketLocal>('SELECT * FROM tickets WHERE codigo_qr = ?', [codigoQr]);
+export function buscarTicketPorId(db: SQLiteDatabase, id: string) {
+  return db.getFirstAsync<TicketLocal>('SELECT * FROM tickets WHERE id = ?', [id]);
 }
 
-/** Marca la entrada como usada. Devuelve false si otro escaneo ya la habia marcado. */
-export async function marcarTicketUsado(db: SQLiteDatabase, codigoQr: string, fila: number) {
+/** Entradas de una fila, filtradas por nombre del comprador o numero de entrada. */
+export function buscarTicketsDeFila(db: SQLiteDatabase, fila: number, texto: string) {
+  const termino = normalizar(texto.trim());
+  return db.getAllAsync<TicketLocal>(
+    `SELECT * FROM tickets
+     WHERE fila_asignada = ?
+       AND (? = '' OR busqueda LIKE ?)
+     ORDER BY nombre_comprador COLLATE NOCASE`,
+    [fila, termino, `%${termino}%`]
+  );
+}
+
+/** Marca la entrada como usada. Devuelve false si ya estaba marcada. */
+export async function marcarTicketUsado(db: SQLiteDatabase, id: string) {
   const resultado = await db.runAsync(
     `UPDATE tickets
-     SET estado = 'USADA', usada_at = ?, usada_por_fila = ?, pendiente_sync = 1
-     WHERE codigo_qr = ? AND estado <> 'USADA'`,
-    [new Date().toISOString(), fila, codigoQr]
+     SET estado = 'USADA', usada_at = ?, pendiente_sync = 1
+     WHERE id = ? AND estado <> 'USADA' AND usada_at IS NULL`,
+    [new Date().toISOString(), id]
   );
   return resultado.changes > 0;
 }
 
 export function obtenerPendientes(db: SQLiteDatabase) {
-  return db.getAllAsync<{ codigo_qr: string; usada_at: string }>(
-    'SELECT codigo_qr, usada_at FROM tickets WHERE pendiente_sync = 1'
+  return db.getAllAsync<{ id: string; usada_at: string }>(
+    'SELECT id, usada_at FROM tickets WHERE pendiente_sync = 1'
   );
 }
 
-export async function limpiarPendientes(db: SQLiteDatabase, codigosQr: string[]) {
-  if (codigosQr.length === 0) return;
-  const marcadores = codigosQr.map(() => '?').join(', ');
-  await db.runAsync(
-    `UPDATE tickets SET pendiente_sync = 0 WHERE codigo_qr IN (${marcadores})`,
-    codigosQr
-  );
+export async function limpiarPendientes(db: SQLiteDatabase, ids: string[]) {
+  if (ids.length === 0) return;
+  const marcadores = ids.map(() => '?').join(', ');
+  await db.runAsync(`UPDATE tickets SET pendiente_sync = 0 WHERE id IN (${marcadores})`, ids);
 }
 
 export type Resumen = {
@@ -136,8 +165,4 @@ export async function obtenerResumen(db: SQLiteDatabase, fila: number): Promise<
     mi_fila_usadas: conteos?.mi_fila_usadas ?? 0,
     ultima_descarga: meta?.valor ?? null,
   };
-}
-
-export async function borrarDatosLocales(db: SQLiteDatabase) {
-  await db.execAsync('DELETE FROM tickets; DELETE FROM meta;');
 }

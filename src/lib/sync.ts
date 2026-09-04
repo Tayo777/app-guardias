@@ -10,15 +10,22 @@ export async function descargarEntradas(db: SQLiteDatabase, token: string) {
   return tickets.length;
 }
 
-/** Sube los escaneos hechos offline y recien ahi los desmarca como pendientes. */
+/**
+ * Sube los escaneos hechos offline. Recien despues de que el backend confirma
+ * se limpia el flag: si falla, quedan pendientes para el proximo intento.
+ */
 export async function subirEscaneos(db: SQLiteDatabase, token: string) {
   const pendientes = await obtenerPendientes(db);
   if (pendientes.length === 0) return 0;
 
-  await api.syncUpload(token, pendientes);
+  // El backend espera la fecha como fecha_escaneo, no como usada_at.
+  await api.syncUpload(
+    token,
+    pendientes.map((p) => ({ id: p.id, fecha_escaneo: p.usada_at }))
+  );
   await limpiarPendientes(
     db,
-    pendientes.map((p) => p.codigo_qr)
+    pendientes.map((p) => p.id)
   );
   return pendientes.length;
 }

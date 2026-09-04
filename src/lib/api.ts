@@ -71,8 +71,8 @@ export async function syncDownload(token: string) {
   return Array.isArray(datos) ? datos : datos.tickets;
 }
 
-/** POST /api/app/sync-upload -> entradas que este guardia marco como usadas offline. */
-export function syncUpload(token: string, tickets: { codigo_qr: string; usada_at: string }[]) {
+/** POST /api/app/sync-upload -> ids de las entradas que este guardia marco como usadas offline. */
+export function syncUpload(token: string, tickets: { id: string; fecha_escaneo: string }[]) {
   return pedir<{ procesados: number }>('/api/app/sync-upload', {
     metodo: 'POST',
     token,

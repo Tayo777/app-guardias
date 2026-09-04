@@ -2,11 +2,20 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { MaxContentWidth, Paleta, Spacing } from '@/constants/theme';
-import { obtenerResumen, type Resumen } from '@/lib/db';
+import { buscarTicketsDeFila, obtenerResumen, type Resumen } from '@/lib/db';
 import { descargarEntradas, subirEscaneos } from '@/lib/sync';
+import type { TicketLocal } from '@/lib/types';
 import { useAuthStore } from '@/store/auth';
 
 export default function MiFilaScreen() {
@@ -18,17 +27,20 @@ export default function MiFilaScreen() {
   const cerrarSesion = useAuthStore((estado) => estado.cerrarSesion);
 
   const [resumen, setResumen] = useState<Resumen | null>(null);
+  const [tickets, setTickets] = useState<TicketLocal[]>([]);
+  const [busqueda, setBusqueda] = useState('');
   const [ocupado, setOcupado] = useState<'descarga' | 'subida' | null>(null);
   const [aviso, setAviso] = useState<{ texto: string; error: boolean } | null>(null);
 
-  const refrescar = useCallback(async () => {
+  const cargar = useCallback(async () => {
     setResumen(await obtenerResumen(db, miNumeroDeFila));
-  }, [db, miNumeroDeFila]);
+    setTickets(await buscarTicketsDeFila(db, miNumeroDeFila, busqueda));
+  }, [db, miNumeroDeFila, busqueda]);
 
   useFocusEffect(
     useCallback(() => {
-      refrescar();
-    }, [refrescar])
+      cargar();
+    }, [cargar])
   );
 
   async function sincronizar(accion: 'descarga' | 'subida') {
@@ -46,7 +58,7 @@ export default function MiFilaScreen() {
           error: false,
         });
       }
-      await refrescar();
+      await cargar();
     } catch (e) {
       setAviso({ texto: e instanceof Error ? e.message : 'Falló la sincronización', error: true });
     } finally {
@@ -54,8 +66,8 @@ export default function MiFilaScreen() {
     }
   }
 
-  return (
-    <ScrollView style={styles.raiz} contentContainerStyle={styles.contenido}>
+  const encabezado = (
+    <View style={styles.encabezadoLista}>
       <View style={styles.encabezado}>
         <View style={styles.flex}>
           <Text style={styles.etiquetaFila}>MI FILA</Text>
@@ -69,12 +81,11 @@ export default function MiFilaScreen() {
       </View>
 
       <View style={styles.tarjeta}>
-        <Dato etiqueta="Entradas del evento" valor={resumen?.total ?? 0} />
-        <Dato etiqueta="Ya utilizadas" valor={resumen?.usadas ?? 0} />
         <Dato
-          etiqueta={`Asignadas a mi fila (${miNumeroDeFila})`}
+          etiqueta="Entradas de mi fila"
           valor={`${resumen?.mi_fila_usadas ?? 0} / ${resumen?.mi_fila_total ?? 0}`}
         />
+        <Dato etiqueta="Entradas del evento" valor={resumen?.total ?? 0} />
         <Dato
           etiqueta="Escaneos sin subir"
           valor={resumen?.pendientes ?? 0}
@@ -85,16 +96,14 @@ export default function MiFilaScreen() {
       <View style={styles.acciones}>
         <BotonAccion
           icono="cloud-download-outline"
-          texto="Descargar entradas"
+          texto="Sincronizar entradas"
           cargando={ocupado === 'descarga'}
           deshabilitado={ocupado !== null}
           onPress={() => sincronizar('descarga')}
         />
         <BotonAccion
           icono="cloud-upload-outline"
-          texto={
-            resumen?.pendientes ? `Subir escaneos (${resumen.pendientes})` : 'Subir escaneos'
-          }
+          texto={resumen?.pendientes ? `Subir escaneos (${resumen.pendientes})` : 'Subir escaneos'}
           cargando={ocupado === 'subida'}
           deshabilitado={ocupado !== null}
           onPress={() => sincronizar('subida')}
@@ -107,12 +116,68 @@ export default function MiFilaScreen() {
         </Text>
       )}
 
-      {resumen?.ultima_descarga && (
-        <Text style={styles.pie}>
-          Última descarga: {new Date(resumen.ultima_descarga).toLocaleString()}
+      <View style={styles.buscador}>
+        <Ionicons name="search" size={18} color={Paleta.textoSuave} />
+        <TextInput
+          style={styles.inputBuscador}
+          placeholder="Buscar por nombre o N° de entrada"
+          placeholderTextColor={Paleta.textoSuave}
+          autoCapitalize="none"
+          autoCorrect={false}
+          value={busqueda}
+          onChangeText={setBusqueda}
+        />
+        {busqueda.length > 0 && (
+          <Pressable accessibilityRole="button" onPress={() => setBusqueda('')}>
+            <Ionicons name="close-circle" size={18} color={Paleta.textoSuave} />
+          </Pressable>
+        )}
+      </View>
+    </View>
+  );
+
+  return (
+    <FlatList
+      style={styles.raiz}
+      contentContainerStyle={styles.contenido}
+      data={tickets}
+      keyExtractor={(item) => String(item.id)}
+      ListHeaderComponent={encabezado}
+      keyboardShouldPersistTaps="handled"
+      renderItem={({ item }) => <FilaTicket ticket={item} />}
+      ListEmptyComponent={
+        <Text style={styles.vacio}>
+          {busqueda
+            ? 'Sin resultados para esa búsqueda.'
+            : 'No hay entradas asignadas a tu fila. Probá sincronizar.'}
         </Text>
+      }
+    />
+  );
+}
+
+function FilaTicket({ ticket }: { ticket: TicketLocal }) {
+  const usada = ticket.estado === 'USADA';
+
+  return (
+    <View style={styles.item}>
+      <View style={styles.flex}>
+        <Text style={styles.itemNombre}>{ticket.nombre_comprador ?? 'Sin nombre'}</Text>
+        <Text style={styles.itemDetalle}>
+          #{ticket.id}
+          {ticket.tipo ? `  ·  ${ticket.tipo}` : ''}
+        </Text>
+      </View>
+
+      {ticket.pendiente_sync === 1 && (
+        <Ionicons name="cloud-offline-outline" size={16} color={Paleta.alerta} />
       )}
-    </ScrollView>
+      <View style={[styles.insignia, { backgroundColor: usada ? '#14532d' : Paleta.superficieAlta }]}>
+        <Text style={[styles.textoInsignia, { color: usada ? '#86efac' : Paleta.textoSuave }]}>
+          {usada ? 'USADA' : 'VÁLIDA'}
+        </Text>
+      </View>
+    </View>
   );
 }
 
@@ -171,12 +236,13 @@ const styles = StyleSheet.create({
   raiz: { flex: 1, backgroundColor: Paleta.fondo },
   flex: { flex: 1 },
   contenido: {
-    gap: Spacing.four,
     padding: Spacing.four,
+    paddingTop: Spacing.three,
     width: '100%',
     maxWidth: MaxContentWidth,
     alignSelf: 'center',
   },
+  encabezadoLista: { gap: Spacing.three, marginBottom: Spacing.three },
   encabezado: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.three },
   etiquetaFila: { color: Paleta.textoSuave, fontSize: 12, fontWeight: '700', letterSpacing: 1 },
   numeroFila: { color: Paleta.texto, fontSize: 56, fontWeight: '800', lineHeight: 62 },
@@ -215,5 +281,28 @@ const styles = StyleSheet.create({
   },
   textoBotonAccion: { color: Paleta.texto, fontWeight: '700', fontSize: 15 },
   aviso: { fontSize: 14 },
-  pie: { color: Paleta.textoSuave, fontSize: 12 },
+  buscador: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    backgroundColor: Paleta.superficie,
+    borderWidth: 1,
+    borderColor: Paleta.borde,
+    borderRadius: 14,
+    paddingHorizontal: Spacing.three,
+  },
+  inputBuscador: { flex: 1, color: Paleta.texto, fontSize: 15, paddingVertical: Spacing.three },
+  item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingVertical: Spacing.three,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Paleta.borde,
+  },
+  itemNombre: { color: Paleta.texto, fontSize: 15, fontWeight: '600' },
+  itemDetalle: { color: Paleta.textoSuave, fontSize: 13, marginTop: 2 },
+  insignia: { borderRadius: 8, paddingHorizontal: Spacing.two, paddingVertical: Spacing.one },
+  textoInsignia: { fontSize: 11, fontWeight: '800' },
+  vacio: { color: Paleta.textoSuave, fontSize: 14, textAlign: 'center', paddingVertical: Spacing.four },
 });

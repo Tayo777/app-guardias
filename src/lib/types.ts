@@ -1,21 +1,24 @@
 export type EstadoTicket = 'VALIDA' | 'USADA';
 
-/** Ticket tal como lo devuelve el backend en /api/app/sync-download. */
+/** Ticket tal como lo devuelve el backend en /api/app/sync-download (camelCase). */
 export type TicketRemoto = {
-  id: number;
-  codigo_qr: string;
-  tipo_entrada: string | null;
-  nombre_cliente: string | null;
+  /** Alfanumerico, ej "A1B2C3D4". */
+  id: string;
   estado: EstadoTicket;
-  fila_asignada: number | null;
+  tipo: string | null;
+  nombreComprador: string | null;
+  filaAsignada: number | null;
 };
 
-/** Ticket tal como vive en la base SQLite del telefono. */
-export type TicketLocal = TicketRemoto & {
-  /** ISO date del momento en que este guardia lo marco como usado. */
+/** Ticket tal como vive en la base SQLite del telefono (snake_case). */
+export type TicketLocal = {
+  id: string;
+  estado: EstadoTicket;
+  tipo: string | null;
+  nombre_comprador: string | null;
+  fila_asignada: number | null;
+  /** ISO date del momento en que se escaneo en este dispositivo. */
   usada_at: string | null;
-  usada_por_fila: number | null;
   /** 1 = escaneado local todavia no subido al backend. */
   pendiente_sync: number;
 };
-

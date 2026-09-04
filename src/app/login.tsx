@@ -5,6 +5,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -39,8 +40,12 @@ export default function LoginScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.raiz}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={styles.contenido}>
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <ScrollView
+        contentContainerStyle={styles.contenido}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        showsVerticalScrollIndicator={false}>
         <View style={styles.marca}>
           <View style={styles.logo}>
             <Ionicons name="shield-checkmark" size={28} color={Paleta.texto} />
@@ -96,7 +101,7 @@ export default function LoginScreen() {
             )}
           </Pressable>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -104,10 +109,11 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   raiz: { flex: 1, backgroundColor: Paleta.fondo },
   contenido: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'center',
     gap: Spacing.six,
     paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.five,
     width: '100%',
     maxWidth: MaxContentWidth,
     alignSelf: 'center',

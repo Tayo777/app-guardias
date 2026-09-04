@@ -3,24 +3,25 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Paleta, Spacing } from '@/constants/theme';
-import { buscarTicketPorQr, contarTickets, marcarTicketUsado } from '@/lib/db';
+import { buscarTicketPorId, contarTickets, marcarTicketUsado } from '@/lib/db';
+import { leerQr, type MotivoInvalido } from '@/lib/qr';
 import type { TicketLocal } from '@/lib/types';
 import { useAuthStore } from '@/store/auth';
 
 type Resultado =
-  | { tipo: 'valida'; ticket: TicketLocal }
-  | { tipo: 'usada'; ticket: TicketLocal }
+  | { tipo: 'permitido'; ticket: TicketLocal }
+  | { tipo: 'ya_escaneada'; ticket: TicketLocal }
   | { tipo: 'otra_fila'; ticket: TicketLocal }
+  | { tipo: 'falso'; motivo: MotivoInvalido }
   | { tipo: 'inexistente'; codigo: string };
 
-const ESTILO_RESULTADO: Record<Resultado['tipo'], { color: string; titulo: string; icono: 'checkmark-circle' | 'close-circle' | 'warning' }> = {
-  valida: { color: Paleta.exito, titulo: 'ENTRADA VÁLIDA', icono: 'checkmark-circle' },
-  usada: { color: Paleta.error, titulo: 'YA UTILIZADA', icono: 'close-circle' },
-  otra_fila: { color: Paleta.alerta, titulo: 'OTRA FILA', icono: 'warning' },
-  inexistente: { color: Paleta.error, titulo: 'ENTRADA INEXISTENTE', icono: 'close-circle' },
+const DETALLE_INVALIDO: Record<MotivoInvalido, string> = {
+  formato: 'El QR no tiene el formato esperado.',
+  firma: 'La firma digital no coincide con el código.',
+  sin_secreto: 'Falta configurar EXPO_PUBLIC_QR_SECRET en la app.',
 };
 
 export default function EscanerScreen() {
@@ -32,35 +33,71 @@ export default function EscanerScreen() {
   const [procesando, setProcesando] = useState(false);
   const [enfocado, setEnfocado] = useState(false);
   const [sinEntradas, setSinEntradas] = useState(false);
+  const [linterna, setLinterna] = useState(false);
+  const [manualAbierto, setManualAbierto] = useState(false);
+  const [codigoManual, setCodigoManual] = useState('');
 
   useFocusEffect(
     useCallback(() => {
       setEnfocado(true);
       contarTickets(db).then((cantidad) => setSinEntradas(cantidad === 0));
-      return () => setEnfocado(false);
+      return () => {
+        setEnfocado(false);
+        setLinterna(false);
+      };
     }, [db])
   );
 
-  async function validar(ticket: TicketLocal) {
-    const marcado = await marcarTicketUsado(db, ticket.codigo_qr, miNumeroDeFila);
-    const actualizado = (await buscarTicketPorQr(db, ticket.codigo_qr)) ?? ticket;
-    setResultado({ tipo: marcado ? 'valida' : 'usada', ticket: actualizado });
-  }
+  const procesarId = useCallback(
+    async (id: string) => {
+      const ticket = await buscarTicketPorId(db, id);
 
-  async function alEscanear(codigo: string) {
+      if (!ticket) {
+        setResultado({ tipo: 'inexistente', codigo: id });
+        return;
+      }
+
+      // Regla de particion: si no es de esta fila se bloquea y NO se toca la entrada.
+      if (ticket.fila_asignada !== null && ticket.fila_asignada !== miNumeroDeFila) {
+        setResultado({ tipo: 'otra_fila', ticket });
+        return;
+      }
+
+      if (ticket.estado === 'USADA' || ticket.usada_at !== null) {
+        setResultado({ tipo: 'ya_escaneada', ticket });
+        return;
+      }
+
+      const marcado = await marcarTicketUsado(db, ticket.id);
+      const actualizado = (await buscarTicketPorId(db, ticket.id)) ?? ticket;
+      setResultado({ tipo: marcado ? 'permitido' : 'ya_escaneada', ticket: actualizado });
+    },
+    [db, miNumeroDeFila]
+  );
+
+  async function alEscanear(dato: string) {
     if (procesando || resultado) return;
     setProcesando(true);
     try {
-      const ticket = await buscarTicketPorQr(db, codigo);
-      if (!ticket) {
-        setResultado({ tipo: 'inexistente', codigo });
-      } else if (ticket.estado === 'USADA') {
-        setResultado({ tipo: 'usada', ticket });
-      } else if (ticket.fila_asignada !== null && ticket.fila_asignada !== miNumeroDeFila) {
-        setResultado({ tipo: 'otra_fila', ticket });
-      } else {
-        await validar(ticket);
+      const lectura = leerQr(dato);
+      if (!lectura.valido) {
+        setResultado({ tipo: 'falso', motivo: lectura.motivo });
+        return;
       }
+      await procesarId(lectura.id);
+    } finally {
+      setProcesando(false);
+    }
+  }
+
+  async function validarManual() {
+    const id = codigoManual.trim();
+    if (!id || procesando) return;
+    setProcesando(true);
+    setManualAbierto(false);
+    setCodigoManual('');
+    try {
+      await procesarId(id);
     } finally {
       setProcesando(false);
     }
@@ -88,95 +125,178 @@ export default function EscanerScreen() {
         <CameraView
           style={StyleSheet.absoluteFill}
           facing="back"
+          enableTorch={linterna}
           barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
           onBarcodeScanned={resultado ? undefined : ({ data }) => alEscanear(data)}
         />
       )}
 
       {!resultado && (
-        <View style={styles.guiaContenedor} pointerEvents="none">
-          <View style={styles.guia} />
-          <Text style={styles.guiaTexto}>Apuntá al QR de la entrada</Text>
-        </View>
+        <>
+          <View style={styles.guiaContenedor} pointerEvents="none">
+            <View style={styles.guia} />
+            <Text style={styles.guiaTexto}>Apuntá al QR de la entrada</Text>
+          </View>
+
+          {sinEntradas && (
+            <View style={styles.avisoSinDatos}>
+              <Ionicons name="cloud-download-outline" size={16} color={Paleta.alerta} />
+              <Text style={styles.textoAvisoSinDatos}>
+                No hay entradas descargadas. Andá a Mi Fila y tocá Sincronizar.
+              </Text>
+            </View>
+          )}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={linterna ? 'Apagar linterna' : 'Encender linterna'}
+            onPress={() => setLinterna((prendida) => !prendida)}
+            style={[styles.botonFlotante, styles.botonLinterna, linterna && styles.linternaActiva]}>
+            <Ionicons
+              name={linterna ? 'flashlight' : 'flashlight-outline'}
+              size={24}
+              color={linterna ? '#09090b' : '#ffffff'}
+            />
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setManualAbierto(true)}
+            style={[styles.botonFlotante, styles.botonManual]}>
+            <Ionicons name="keypad" size={22} color="#ffffff" />
+            <Text style={styles.textoBotonManual}>Cargar código</Text>
+          </Pressable>
+        </>
       )}
 
-      {sinEntradas && !resultado && (
-        <View style={styles.avisoSinDatos}>
-          <Ionicons name="cloud-download-outline" size={16} color={Paleta.alerta} />
-          <Text style={styles.textoAvisoSinDatos}>
-            No hay entradas descargadas. Andá a Mi Fila y tocá Descargar entradas.
-          </Text>
-        </View>
+      {resultado && (
+        <PantallaResultado
+          resultado={resultado}
+          miNumeroDeFila={miNumeroDeFila}
+          onCerrar={() => setResultado(null)}
+        />
       )}
 
-      {resultado && <PanelResultado resultado={resultado} miNumeroDeFila={miNumeroDeFila} onValidar={validar} onCerrar={() => setResultado(null)} />}
+      <Modal
+        visible={manualAbierto}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setManualAbierto(false)}>
+        <View style={styles.fondoModal}>
+          <View style={styles.tarjetaModal}>
+            <Text style={styles.tituloModal}>Cargar código manualmente</Text>
+            <Text style={styles.subtituloModal}>
+              Usalo solo si la cámara falla. La carga manual no valida la firma del QR.
+            </Text>
+            <TextInput
+              style={styles.inputModal}
+              placeholder="Ej: A1B2C3D4"
+              placeholderTextColor={Paleta.textoSuave}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              autoFocus
+              value={codigoManual}
+              onChangeText={setCodigoManual}
+              onSubmitEditing={validarManual}
+            />
+            <View style={styles.accionesModal}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  setManualAbierto(false);
+                  setCodigoManual('');
+                }}
+                style={[styles.botonModal, { backgroundColor: Paleta.superficieAlta }]}>
+                <Text style={styles.textoBotonModal}>Cancelar</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={validarManual}
+                style={[styles.botonModal, { backgroundColor: Paleta.primario }]}>
+                <Text style={styles.textoBotonModal}>Validar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
-function PanelResultado({
+function PantallaResultado({
   resultado,
   miNumeroDeFila,
-  onValidar,
   onCerrar,
 }: {
   resultado: Resultado;
   miNumeroDeFila: number;
-  onValidar: (ticket: TicketLocal) => void;
   onCerrar: () => void;
 }) {
-  const estilo = ESTILO_RESULTADO[resultado.tipo];
+  const contenido = {
+    permitido: { fondo: '#15803d', icono: 'checkmark-circle' as const, titulo: 'ACCESO PERMITIDO' },
+    ya_escaneada: {
+      fondo: '#b91c1c',
+      icono: 'close-circle' as const,
+      titulo: 'ENTRADA YA ESCANEADA',
+    },
+    otra_fila: { fondo: '#c2410c', icono: 'swap-horizontal' as const, titulo: 'PERTENECE A OTRA FILA' },
+    falso: { fondo: '#7f1d1d', icono: 'alert-circle' as const, titulo: 'QR FALSO O ADULTERADO' },
+    inexistente: { fondo: '#b91c1c', icono: 'help-circle' as const, titulo: 'ENTRADA INEXISTENTE' },
+  }[resultado.tipo];
 
   return (
-    <View style={styles.panelContenedor}>
-      <View style={[styles.panel, { borderColor: estilo.color }]}>
-        <View style={styles.panelEncabezado}>
-          <Ionicons name={estilo.icono} size={26} color={estilo.color} />
-          <Text style={[styles.panelTitulo, { color: estilo.color }]}>{estilo.titulo}</Text>
-        </View>
+    <View style={[styles.overlay, { backgroundColor: contenido.fondo }]}>
+      <View style={styles.overlayCentro}>
+        <Ionicons name={contenido.icono} size={92} color="#ffffff" />
+        <Text style={styles.overlayTitulo}>{contenido.titulo}</Text>
 
-        {resultado.tipo === 'inexistente' ? (
-          <Text style={styles.panelTexto}>
-            El código {resultado.codigo} no pertenece a este evento.
-          </Text>
-        ) : (
-          <View style={styles.panelDetalle}>
-            <Text style={styles.panelNombre}>
-              {resultado.ticket.nombre_cliente ?? 'Sin nombre'}
+        {resultado.tipo === 'permitido' && (
+          <View style={styles.overlayDetalle}>
+            <Text style={styles.overlayTipo}>{resultado.ticket.tipo ?? 'Entrada general'}</Text>
+            <Text style={styles.overlayNombre}>
+              {resultado.ticket.nombre_comprador ?? 'Sin nombre'}
             </Text>
-            <Text style={styles.panelTexto}>
-              {resultado.ticket.tipo_entrada ?? 'Entrada general'}
-              {resultado.ticket.fila_asignada !== null &&
-                `  ·  Fila ${resultado.ticket.fila_asignada}`}
+          </View>
+        )}
+
+        {resultado.tipo === 'ya_escaneada' && (
+          <View style={styles.overlayDetalle}>
+            <Text style={styles.overlaySubtitulo}>RECHAZAR</Text>
+            <Text style={styles.overlayNombre}>
+              {resultado.ticket.nombre_comprador ?? 'Sin nombre'}
             </Text>
-            {resultado.tipo === 'usada' && resultado.ticket.usada_at && (
-              <Text style={styles.panelTexto}>
-                Utilizada el {new Date(resultado.ticket.usada_at).toLocaleString()}
-              </Text>
-            )}
-            {resultado.tipo === 'otra_fila' && (
-              <Text style={styles.panelTexto}>
-                Corresponde a la fila {resultado.ticket.fila_asignada}, vos sos la{' '}
-                {miNumeroDeFila}.
+            {resultado.ticket.usada_at && (
+              <Text style={styles.overlayTexto}>
+                Escaneada el {new Date(resultado.ticket.usada_at).toLocaleString()}
               </Text>
             )}
           </View>
         )}
 
-        <View style={styles.panelAcciones}>
-          {resultado.tipo === 'otra_fila' && (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => onValidar(resultado.ticket)}
-              style={[styles.botonPanel, { backgroundColor: Paleta.alerta }]}>
-              <Text style={styles.textoBotonPanelOscuro}>Validar igual</Text>
-            </Pressable>
-          )}
-          <Pressable accessibilityRole="button" onPress={onCerrar} style={styles.botonPanel}>
-            <Text style={styles.textoBotonPanel}>Escanear siguiente</Text>
-          </Pressable>
-        </View>
+        {resultado.tipo === 'otra_fila' && (
+          <View style={styles.overlayDetalle}>
+            <Text style={styles.overlayTexto}>Dirigir a</Text>
+            <View style={styles.insigniaFila}>
+              <Text style={styles.textoInsigniaFila}>FILA {resultado.ticket.fila_asignada}</Text>
+            </View>
+            <Text style={styles.overlayTexto}>Vos estás cubriendo la fila {miNumeroDeFila}</Text>
+          </View>
+        )}
+
+        {resultado.tipo === 'falso' && (
+          <Text style={styles.overlayTexto}>{DETALLE_INVALIDO[resultado.motivo]}</Text>
+        )}
+
+        {resultado.tipo === 'inexistente' && (
+          <Text style={styles.overlayTexto}>
+            El código {resultado.codigo} no pertenece a este evento.
+          </Text>
+        )}
       </View>
+
+      <Pressable accessibilityRole="button" onPress={onCerrar} style={styles.botonSiguiente}>
+        <Text style={styles.textoBotonSiguiente}>Escanear siguiente</Text>
+      </Pressable>
     </View>
   );
 }
@@ -198,6 +318,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.four,
   },
   textoBotonPrimario: { color: '#ffffff', fontWeight: '700' },
+
   guiaContenedor: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.four },
   guia: {
     width: 240,
@@ -211,7 +332,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: Spacing.three,
     left: Spacing.three,
-    right: Spacing.three,
+    right: 72,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
@@ -222,26 +343,104 @@ const styles = StyleSheet.create({
     padding: Spacing.three,
   },
   textoAvisoSinDatos: { color: Paleta.texto, fontSize: 13, flex: 1 },
-  panelContenedor: { flex: 1, justifyContent: 'flex-end', padding: Spacing.three },
-  panel: {
-    backgroundColor: Paleta.fondo,
+
+  botonFlotante: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(9,9,11,0.75)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  botonLinterna: { top: Spacing.three, right: Spacing.three, width: 52, height: 52, borderRadius: 26 },
+  linternaActiva: { backgroundColor: '#facc15', borderColor: '#facc15' },
+  botonManual: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+    bottom: Spacing.four,
+    right: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+    borderRadius: 28,
+  },
+  textoBotonManual: { color: '#ffffff', fontWeight: '700' },
+
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    padding: Spacing.four,
+    justifyContent: 'space-between',
+  },
+  overlayCentro: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three },
+  overlayTitulo: {
+    color: '#ffffff',
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  overlayDetalle: { alignItems: 'center', gap: Spacing.two },
+  overlaySubtitulo: { color: '#ffffff', fontSize: 24, fontWeight: '900', letterSpacing: 2 },
+  overlayTipo: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  overlayNombre: { color: '#ffffff', fontSize: 26, fontWeight: '700', textAlign: 'center' },
+  overlayTexto: { color: 'rgba(255,255,255,0.9)', fontSize: 16, textAlign: 'center' },
+  insigniaFila: {
+    backgroundColor: '#1d4ed8',
+    borderRadius: 18,
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.three,
+  },
+  textoInsigniaFila: { color: '#ffffff', fontSize: 40, fontWeight: '900', letterSpacing: 2 },
+  botonSiguiente: {
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderRadius: 16,
+    paddingVertical: Spacing.four,
+    alignItems: 'center',
+  },
+  textoBotonSiguiente: { color: '#ffffff', fontSize: 17, fontWeight: '800' },
+
+  fondoModal: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'center',
+    padding: Spacing.four,
+  },
+  tarjetaModal: {
+    backgroundColor: Paleta.superficie,
+    borderWidth: 1,
+    borderColor: Paleta.borde,
     borderRadius: 20,
-    borderWidth: 2,
     padding: Spacing.four,
     gap: Spacing.three,
   },
-  panelEncabezado: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  panelTitulo: { fontSize: 18, fontWeight: '800' },
-  panelDetalle: { gap: Spacing.one },
-  panelNombre: { color: Paleta.texto, fontSize: 16, fontWeight: '700' },
-  panelTexto: { color: Paleta.textoSuave, fontSize: 14 },
-  panelAcciones: { gap: Spacing.two },
-  botonPanel: {
-    backgroundColor: Paleta.superficieAlta,
+  tituloModal: { color: Paleta.texto, fontSize: 18, fontWeight: '800' },
+  subtituloModal: { color: Paleta.textoSuave, fontSize: 13 },
+  inputModal: {
+    backgroundColor: Paleta.fondo,
+    borderWidth: 1,
+    borderColor: Paleta.borde,
+    borderRadius: 14,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+    fontSize: 18,
+    letterSpacing: 2,
+    color: Paleta.texto,
+  },
+  accionesModal: { flexDirection: 'row', gap: Spacing.two },
+  botonModal: {
+    flex: 1,
     borderRadius: 14,
     paddingVertical: Spacing.three,
     alignItems: 'center',
   },
-  textoBotonPanel: { color: Paleta.texto, fontWeight: '700' },
-  textoBotonPanelOscuro: { color: '#09090b', fontWeight: '800' },
+  textoBotonModal: { color: '#ffffff', fontWeight: '700' },
 });

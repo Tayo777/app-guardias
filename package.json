@@ -5,6 +5,8 @@
   "dependencies": {
     "@expo/ui": "~57.0.16",
     "@expo/vector-icons": "^15.0.2",
+    "@types/crypto-js": "^4.2.2",
+    "crypto-js": "^4.2.0",
     "expo": "~57.0.20",
     "expo-camera": "~57.0.4",
     "expo-constants": "~57.0.17",
