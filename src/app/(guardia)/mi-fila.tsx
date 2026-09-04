@@ -12,8 +12,8 @@ import { useAuthStore } from '@/store/auth';
 export default function MiFilaScreen() {
   const db = useSQLiteContext();
   const token = useAuthStore((estado) => estado.token);
-  const guardia = useAuthStore((estado) => estado.guardia);
-  const evento = useAuthStore((estado) => estado.evento);
+  const email = useAuthStore((estado) => estado.email);
+  const eventoNombre = useAuthStore((estado) => estado.eventoNombre);
   const miNumeroDeFila = useAuthStore((estado) => estado.miNumeroDeFila) ?? 0;
   const cerrarSesion = useAuthStore((estado) => estado.cerrarSesion);
 
@@ -60,8 +60,8 @@ export default function MiFilaScreen() {
         <View style={styles.flex}>
           <Text style={styles.etiquetaFila}>MI FILA</Text>
           <Text style={styles.numeroFila}>{miNumeroDeFila}</Text>
-          <Text style={styles.subtitulo}>{guardia?.nombre ?? guardia?.email}</Text>
-          {evento && <Text style={styles.subtitulo}>{evento.nombre}</Text>}
+          <Text style={styles.subtitulo}>{email}</Text>
+          {eventoNombre && <Text style={styles.subtitulo}>{eventoNombre}</Text>}
         </View>
         <Pressable accessibilityRole="button" onPress={cerrarSesion} style={styles.botonSalir}>
           <Ionicons name="log-out-outline" size={20} color={Paleta.textoSuave} />

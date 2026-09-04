@@ -3,7 +3,6 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import * as api from '@/lib/api';
-import type { Evento, Guardia } from '@/lib/types';
 
 const almacenamientoSeguro = {
   getItem: (nombre: string) => SecureStore.getItemAsync(nombre),
@@ -13,8 +12,9 @@ const almacenamientoSeguro = {
 
 type EstadoAuth = {
   token: string | null;
-  guardia: Guardia | null;
-  evento: Evento | null;
+  email: string | null;
+  eventoId: number | null;
+  eventoNombre: string | null;
   /** Fila que le toca cubrir a este guardia. Define que entradas son "suyas". */
   miNumeroDeFila: number | null;
   /** false hasta que termina de leerse la sesion guardada en el dispositivo. */
@@ -27,23 +27,31 @@ export const useAuthStore = create<EstadoAuth>()(
   persist(
     (set) => ({
       token: null,
-      guardia: null,
-      evento: null,
+      email: null,
+      eventoId: null,
+      eventoNombre: null,
       miNumeroDeFila: null,
       hidratado: false,
 
       iniciarSesion: async (email, password) => {
-        const { token, guardia, evento } = await api.login(email, password);
+        const respuesta = await api.login(email, password);
         set({
-          token,
-          guardia,
-          evento: evento ?? null,
-          miNumeroDeFila: guardia.fila_asignada,
+          token: respuesta.token,
+          email,
+          eventoId: respuesta.eventoId,
+          eventoNombre: respuesta.eventoNombre,
+          miNumeroDeFila: respuesta.filaAsignada,
         });
       },
 
       cerrarSesion: () => {
-        set({ token: null, guardia: null, evento: null, miNumeroDeFila: null });
+        set({
+          token: null,
+          email: null,
+          eventoId: null,
+          eventoNombre: null,
+          miNumeroDeFila: null,
+        });
       },
     }),
     {
@@ -51,8 +59,9 @@ export const useAuthStore = create<EstadoAuth>()(
       storage: createJSONStorage(() => almacenamientoSeguro),
       partialize: (estado) => ({
         token: estado.token,
-        guardia: estado.guardia,
-        evento: estado.evento,
+        email: estado.email,
+        eventoId: estado.eventoId,
+        eventoNombre: estado.eventoNombre,
         miNumeroDeFila: estado.miNumeroDeFila,
       }),
       onRehydrateStorage: () => () => {

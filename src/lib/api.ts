@@ -1,5 +1,5 @@
 import { API_BASE_URL, TIMEOUT_MS } from '@/lib/config';
-import type { Evento, Guardia, TicketRemoto } from '@/lib/types';
+import type { TicketRemoto } from '@/lib/types';
 
 export class ApiError extends Error {
   constructor(
@@ -47,13 +47,15 @@ async function pedir<T>(ruta: string, { metodo = 'GET', token, cuerpo }: Opcione
   return datos as T;
 }
 
+/** Respuesta plana en camelCase, tal como la devuelve el backend. */
 export type RespuestaLogin = {
   token: string;
-  guardia: Guardia;
-  evento?: Evento | null;
+  filaAsignada: number;
+  eventoId: number;
+  eventoNombre: string;
 };
 
-/** POST /api/app/login -> JWT + datos del guardia (incluye su fila_asignada). */
+/** POST /api/app/login -> JWT + la fila que le toca cubrir al guardia. */
 export function login(email: string, password: string) {
   return pedir<RespuestaLogin>('/api/app/login', {
     metodo: 'POST',

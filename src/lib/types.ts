@@ -19,16 +19,3 @@ export type TicketLocal = TicketRemoto & {
   pendiente_sync: number;
 };
 
-export type Evento = {
-  id: number;
-  nombre: string;
-  fecha: string | null;
-};
-
-export type Guardia = {
-  id: number;
-  email: string;
-  nombre: string | null;
-  fila_asignada: number;
-  evento_id: number | null;
-};
