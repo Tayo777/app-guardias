@@ -32,6 +32,15 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
+      ],
+      "expo-sqlite",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Permite el acceso a la camara para escanear los QR de las entradas.",
+          "barcodeScannerEnabled": true
+        }
       ]
     ],
     "experiments": {
