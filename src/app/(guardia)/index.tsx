@@ -7,7 +7,7 @@ import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-nativ
 
 import { Paleta, Spacing } from '@/constants/theme';
 import { buscarTicketPorId, contarTickets, marcarTicketUsado } from '@/lib/db';
-import { leerQr, type MotivoInvalido } from '@/lib/qr';
+import { leerQr, type LecturaQr } from '@/lib/qr';
 import type { TicketLocal } from '@/lib/types';
 import { useAuthStore } from '@/store/auth';
 
@@ -15,14 +15,8 @@ type Resultado =
   | { tipo: 'permitido'; ticket: TicketLocal }
   | { tipo: 'ya_escaneada'; ticket: TicketLocal }
   | { tipo: 'otra_fila'; ticket: TicketLocal }
-  | { tipo: 'falso'; motivo: MotivoInvalido }
-  | { tipo: 'inexistente'; codigo: string };
-
-const DETALLE_INVALIDO: Record<MotivoInvalido, string> = {
-  formato: 'El QR no tiene el formato esperado.',
-  firma: 'La firma digital no coincide con el código.',
-  sin_secreto: 'La sesión no tiene el secreto del evento. Cerrá sesión y volvé a ingresar.',
-};
+  | { tipo: 'inexistente'; codigo: string }
+  | (Extract<LecturaQr, { valido: false }> & { tipo: 'invalido' });
 
 export default function EscanerScreen() {
   const db = useSQLiteContext();
@@ -82,7 +76,7 @@ export default function EscanerScreen() {
     try {
       const lectura = leerQr(dato, qrSecret);
       if (!lectura.valido) {
-        setResultado({ tipo: 'falso', motivo: lectura.motivo });
+        setResultado({ ...lectura, tipo: 'invalido' });
         return;
       }
       await procesarId(lectura.id);
@@ -224,6 +218,30 @@ export default function EscanerScreen() {
   );
 }
 
+/**
+ * Cada motivo de invalidez tiene severidad distinta: "firma" es sospecha real
+ * de fraude, "sin_secreto" es un problema de configuracion de la sesion, y
+ * "formato" suele ser un QR viejo o de otro sistema. Mostrarlos todos como
+ * "QR FALSO" confunde al guardia y esconde el problema real (esto fue un bug).
+ */
+const CONTENIDO_INVALIDO = {
+  formato: {
+    fondo: '#78350f',
+    icono: 'help-circle-outline' as const,
+    titulo: 'QR NO RECONOCIDO',
+  },
+  sin_secreto: {
+    fondo: '#1e3a8a',
+    icono: 'key-outline' as const,
+    titulo: 'FALTA CONFIGURACIÓN',
+  },
+  firma: {
+    fondo: '#7f1d1d',
+    icono: 'alert-circle' as const,
+    titulo: 'QR FALSO O ADULTERADO',
+  },
+};
+
 function PantallaResultado({
   resultado,
   miNumeroDeFila,
@@ -233,17 +251,31 @@ function PantallaResultado({
   miNumeroDeFila: number;
   onCerrar: () => void;
 }) {
-  const contenido = {
-    permitido: { fondo: '#15803d', icono: 'checkmark-circle' as const, titulo: 'ACCESO PERMITIDO' },
-    ya_escaneada: {
-      fondo: '#b91c1c',
-      icono: 'close-circle' as const,
-      titulo: 'ENTRADA YA ESCANEADA',
-    },
-    otra_fila: { fondo: '#c2410c', icono: 'swap-horizontal' as const, titulo: 'PERTENECE A OTRA FILA' },
-    falso: { fondo: '#7f1d1d', icono: 'alert-circle' as const, titulo: 'QR FALSO O ADULTERADO' },
-    inexistente: { fondo: '#b91c1c', icono: 'help-circle' as const, titulo: 'ENTRADA INEXISTENTE' },
-  }[resultado.tipo];
+  const contenido =
+    resultado.tipo === 'invalido'
+      ? CONTENIDO_INVALIDO[resultado.motivo]
+      : {
+          permitido: {
+            fondo: '#15803d',
+            icono: 'checkmark-circle' as const,
+            titulo: 'ACCESO PERMITIDO',
+          },
+          ya_escaneada: {
+            fondo: '#b91c1c',
+            icono: 'close-circle' as const,
+            titulo: 'ENTRADA YA ESCANEADA',
+          },
+          otra_fila: {
+            fondo: '#c2410c',
+            icono: 'swap-horizontal' as const,
+            titulo: 'PERTENECE A OTRA FILA',
+          },
+          inexistente: {
+            fondo: '#b91c1c',
+            icono: 'help-circle' as const,
+            titulo: 'ENTRADA INEXISTENTE',
+          },
+        }[resultado.tipo];
 
   return (
     <View style={[styles.overlay, { backgroundColor: contenido.fondo }]}>
@@ -284,8 +316,25 @@ function PantallaResultado({
           </View>
         )}
 
-        {resultado.tipo === 'falso' && (
-          <Text style={styles.overlayTexto}>{DETALLE_INVALIDO[resultado.motivo]}</Text>
+        {resultado.tipo === 'invalido' && (
+          <View style={styles.overlayDetalle}>
+            {resultado.motivo === 'sin_secreto' && (
+              <Text style={styles.overlayTexto}>
+                La sesión no tiene el secreto del evento. Cerrá sesión y volvé a ingresar.
+              </Text>
+            )}
+            {resultado.motivo === 'formato' && (
+              <Text style={styles.overlayTexto}>
+                El QR no tiene el formato esperado (¿es de otro sistema o de un evento viejo?).
+              </Text>
+            )}
+            {resultado.motivo === 'firma' && (
+              <Text style={styles.overlayTexto}>
+                El código no coincide con la firma del evento.
+              </Text>
+            )}
+            <PanelTecnico resultado={resultado} />
+          </View>
         )}
 
         {resultado.tipo === 'inexistente' && (
@@ -298,6 +347,54 @@ function PantallaResultado({
       <Pressable accessibilityRole="button" onPress={onCerrar} style={styles.botonSiguiente}>
         <Text style={styles.textoBotonSiguiente}>Escanear siguiente</Text>
       </Pressable>
+    </View>
+  );
+}
+
+/**
+ * Detalle tecnico para diagnosticar el desajuste con el backend sin exponer el
+ * secreto: id leido, y para "firma" ambos hashes completos (Hex-SHA256) para
+ * compararlos caracter a caracter con lo que firma el backend.
+ */
+function PanelTecnico({ resultado }: { resultado: Extract<Resultado, { tipo: 'invalido' }> }) {
+  const [abierto, setAbierto] = useState(false);
+
+  return (
+    <View style={styles.panelTecnico}>
+      <Pressable accessibilityRole="button" onPress={() => setAbierto((v) => !v)}>
+        <Text style={styles.textoPanelTecnicoToggle}>
+          {abierto ? 'Ocultar detalle técnico ▲' : 'Ver detalle técnico ▼'}
+        </Text>
+      </Pressable>
+
+      {abierto && (
+        <View style={styles.panelTecnicoContenido}>
+          {resultado.motivo === 'formato' && (
+            <FilaTecnica etiqueta="Contenido crudo del QR" valor={resultado.crudo} />
+          )}
+          {resultado.motivo === 'sin_secreto' && (
+            <FilaTecnica etiqueta="id leído" valor={resultado.id} />
+          )}
+          {resultado.motivo === 'firma' && (
+            <>
+              <FilaTecnica etiqueta="id leído" valor={resultado.id} />
+              <FilaTecnica etiqueta="firma del QR" valor={resultado.firmaRecibida} />
+              <FilaTecnica etiqueta="firma esperada" valor={resultado.firmaEsperada} />
+            </>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function FilaTecnica({ etiqueta, valor }: { etiqueta: string; valor: string }) {
+  return (
+    <View style={styles.filaTecnica}>
+      <Text style={styles.etiquetaTecnica}>{etiqueta}</Text>
+      <Text style={styles.valorTecnico} selectable>
+        {valor || '(vacío)'}
+      </Text>
     </View>
   );
 }
@@ -408,6 +505,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   textoBotonSiguiente: { color: '#ffffff', fontSize: 17, fontWeight: '800' },
+  panelTecnico: { marginTop: Spacing.two, alignItems: 'center' },
+  textoPanelTecnicoToggle: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    textDecorationLine: 'underline',
+  },
+  panelTecnicoContenido: {
+    marginTop: Spacing.two,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderRadius: 12,
+    padding: Spacing.three,
+    gap: Spacing.two,
+    width: '100%',
+  },
+  filaTecnica: { gap: 2 },
+  etiquetaTecnica: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  valorTecnico: { color: '#ffffff', fontSize: 13, fontFamily: 'monospace' },
 
   fondoModal: {
     flex: 1,
