@@ -379,7 +379,10 @@ function PanelTecnico({ resultado }: { resultado: Extract<Resultado, { tipo: 'in
             <>
               <FilaTecnica etiqueta="id leído" valor={resultado.id} />
               <FilaTecnica etiqueta="firma del QR" valor={resultado.firmaRecibida} />
-              <FilaTecnica etiqueta="firma esperada" valor={resultado.firmaEsperada} />
+              <Text style={styles.etiquetaTecnica}>Candidatos probados (ninguno coincidió)</Text>
+              {resultado.candidatos.map((c) => (
+                <FilaTecnica key={c.etiqueta} etiqueta={c.etiqueta} valor={c.valor} />
+              ))}
             </>
           )}
         </View>
