@@ -16,6 +16,7 @@ import { MaxContentWidth, Paleta, Spacing } from '@/constants/theme';
 import { buscarTicketsDeFila, obtenerResumen, type Resumen } from '@/lib/db';
 import { descargarEntradas, subirEscaneos } from '@/lib/sync';
 import type { TicketLocal } from '@/lib/types';
+import { actualizacionesHabilitadas, verificarActualizaciones } from '@/lib/updates';
 import { useAuthStore } from '@/store/auth';
 
 export default function MiFilaScreen() {
@@ -31,6 +32,7 @@ export default function MiFilaScreen() {
   const [busqueda, setBusqueda] = useState('');
   const [ocupado, setOcupado] = useState<'descarga' | 'subida' | null>(null);
   const [aviso, setAviso] = useState<{ texto: string; error: boolean } | null>(null);
+  const [buscandoActualizacion, setBuscandoActualizacion] = useState(false);
 
   const cargar = useCallback(async () => {
     setResumen(await obtenerResumen(db, miNumeroDeFila));
@@ -64,6 +66,22 @@ export default function MiFilaScreen() {
     } finally {
       setOcupado(null);
     }
+  }
+
+  async function buscarActualizacion() {
+    if (buscandoActualizacion) return;
+    setBuscandoActualizacion(true);
+    setAviso(null);
+    const resultado = await verificarActualizaciones();
+    if (resultado.motivo === 'deshabilitado') {
+      setAviso({ texto: 'Las actualizaciones OTA no están disponibles en este build.', error: true });
+    } else if (resultado.motivo) {
+      setAviso({ texto: `No se pudo buscar actualizaciones: ${resultado.motivo}`, error: true });
+    } else if (!resultado.disponible) {
+      setAviso({ texto: 'Ya tenés la última versión.', error: false });
+    }
+    // si hay una disponible, el modal global (ActualizadorApp) se encarga de avisar y descargar
+    setBuscandoActualizacion(false);
   }
 
   const encabezado = (
@@ -109,6 +127,19 @@ export default function MiFilaScreen() {
           onPress={() => sincronizar('subida')}
         />
       </View>
+
+      <Pressable
+        accessibilityRole="button"
+        disabled={buscandoActualizacion}
+        onPress={buscarActualizacion}
+        style={styles.botonActualizacion}>
+        {buscandoActualizacion ? (
+          <ActivityIndicator size="small" color={Paleta.textoSuave} />
+        ) : (
+          <Ionicons name="refresh" size={14} color={Paleta.textoSuave} />
+        )}
+        <Text style={styles.textoBotonActualizacion}>Buscar actualizaciones</Text>
+      </Pressable>
 
       {aviso && (
         <Text style={[styles.aviso, { color: aviso.error ? Paleta.error : Paleta.exito }]}>
@@ -280,6 +311,14 @@ const styles = StyleSheet.create({
     minHeight: 50,
   },
   textoBotonAccion: { color: Paleta.texto, fontWeight: '700', fontSize: 15 },
+  botonActualizacion: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.one,
+    paddingVertical: Spacing.one,
+  },
+  textoBotonActualizacion: { color: Paleta.textoSuave, fontSize: 12 },
   aviso: { fontSize: 14 },
   buscador: {
     flexDirection: 'row',

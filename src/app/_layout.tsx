@@ -3,6 +3,7 @@ import { SQLiteProvider } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View } from 'react-native';
 
+import { ActualizadorApp } from '@/components/actualizador-app';
 import { BannerRed } from '@/components/banner-red';
 import { Paleta } from '@/constants/theme';
 import { DATABASE_NAME } from '@/lib/config';
@@ -17,6 +18,7 @@ export default function RootLayout() {
         <View style={styles.raiz}>
           <BannerRed />
           <NavegadorRaiz />
+          <ActualizadorApp />
         </View>
       </SQLiteProvider>
     </ThemeProvider>
