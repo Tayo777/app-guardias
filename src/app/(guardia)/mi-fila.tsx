@@ -14,7 +14,7 @@ import {
 
 import { MaxContentWidth, Paleta, Spacing } from '@/constants/theme';
 import { buscarTicketsDeFila, obtenerResumen, type Resumen } from '@/lib/db';
-import { descargarEntradas, subirEscaneos } from '@/lib/sync';
+import { descargarEntradas, sincronizarTodo } from '@/lib/sync';
 import type { TicketLocal } from '@/lib/types';
 import { actualizacionesHabilitadas, verificarActualizaciones } from '@/lib/updates';
 import { useAuthStore } from '@/store/auth';
@@ -54,9 +54,14 @@ export default function MiFilaScreen() {
         const cantidad = await descargarEntradas(db, token);
         setAviso({ texto: `${cantidad} entradas descargadas`, error: false });
       } else {
-        const cantidad = await subirEscaneos(db, token);
+        // Sube y vuelve a bajar: asi lo que se ve en la app es lo que quedo
+        // registrado en el servidor, no solo lo que se mando.
+        const { subidos } = await sincronizarTodo(db, token);
         setAviso({
-          texto: cantidad === 0 ? 'No había escaneos pendientes' : `${cantidad} escaneos subidos`,
+          texto:
+            subidos === 0
+              ? 'No había escaneos pendientes'
+              : `${subidos} escaneos confirmados por el servidor`,
           error: false,
         });
       }
