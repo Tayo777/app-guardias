@@ -2,6 +2,7 @@
   "expo": {
     "name": "app-guardias",
     "slug": "app-guardias",
+    "owner": "tayo777",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -18,10 +19,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
-      ],
+      "permissions": ["android.permission.CAMERA", "android.permission.RECORD_AUDIO"],
       "package": "com.tayo777.appguardias"
     },
     "web": {
@@ -57,6 +55,12 @@
       "eas": {
         "projectId": "8f11a476-54d5-4e6c-a11a-52372df14bf9"
       }
+    },
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/8f11a476-54d5-4e6c-a11a-52372df14bf9"
     }
   }
 }
