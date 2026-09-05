@@ -1,4 +1,4 @@
-import { API_BASE_URL, TIMEOUT_MS } from '@/lib/config';
+import { API_BASE_URL, ERROR_CONFIG_API, TIMEOUT_MS } from '@/lib/config';
 import type { TicketRemoto } from '@/lib/types';
 
 export class ApiError extends Error {
@@ -18,12 +18,15 @@ type Opciones = {
 };
 
 async function pedir<T>(ruta: string, { metodo = 'GET', token, cuerpo }: Opciones = {}): Promise<T> {
+  if (ERROR_CONFIG_API) throw new ApiError(ERROR_CONFIG_API, 0);
+
+  const url = `${API_BASE_URL}${ruta}`;
   const abortador = new AbortController();
   const temporizador = setTimeout(() => abortador.abort(), TIMEOUT_MS);
 
   let respuesta: Response;
   try {
-    respuesta = await fetch(`${API_BASE_URL}${ruta}`, {
+    respuesta = await fetch(url, {
       method: metodo,
       headers: {
         'Content-Type': 'application/json',
@@ -33,7 +36,14 @@ async function pedir<T>(ruta: string, { metodo = 'GET', token, cuerpo }: Opcione
       signal: abortador.signal,
     });
   } catch {
-    throw new ApiError(`No se pudo conectar con ${API_BASE_URL}`, 0);
+    // La URL completa en el mensaje: sin esto, diagnosticar "Network Error"
+    // en un celular sin devtools es adivinar.
+    throw new ApiError(
+      abortador.signal.aborted
+        ? `El servidor no respondió en ${TIMEOUT_MS / 1000}s: ${url}`
+        : `No se pudo conectar con ${url}`,
+      0
+    );
   } finally {
     clearTimeout(temporizador);
   }

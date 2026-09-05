@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { MaxContentWidth, Paleta, Spacing } from '@/constants/theme';
+import { API_BASE_URL } from '@/lib/config';
 import { useAuthStore } from '@/store/auth';
 
 export default function LoginScreen() {
@@ -22,6 +23,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
+  const [verPassword, setVerPassword] = useState(false);
 
   const puedeEnviar = email.trim().length > 0 && password.length > 0 && !enviando;
 
@@ -67,22 +69,42 @@ export default function LoginScreen() {
             onChangeText={setEmail}
             editable={!enviando}
           />
-          <TextInput
-            style={styles.input}
-            placeholder="Contraseña"
-            placeholderTextColor={Paleta.textoSuave}
-            autoCapitalize="none"
-            secureTextEntry
-            value={password}
-            onChangeText={setPassword}
-            onSubmitEditing={enviar}
-            editable={!enviando}
-          />
+          <View style={styles.campoPassword}>
+            <TextInput
+              style={styles.inputPassword}
+              placeholder="Contraseña"
+              placeholderTextColor={Paleta.textoSuave}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry={!verPassword}
+              value={password}
+              onChangeText={setPassword}
+              onSubmitEditing={enviar}
+              editable={!enviando}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={verPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+              onPress={() => setVerPassword((visible) => !visible)}
+              hitSlop={12}
+              style={styles.ojo}>
+              <Ionicons
+                name={verPassword ? 'eye-off' : 'eye'}
+                size={20}
+                color={Paleta.textoSuave}
+              />
+            </Pressable>
+          </View>
 
           {error && (
             <View style={styles.cajaError}>
               <Ionicons name="alert-circle" size={16} color={Paleta.error} />
-              <Text style={styles.textoError}>{error}</Text>
+              <View style={styles.flex}>
+                <Text style={styles.textoError}>{error}</Text>
+                <Text style={styles.textoDiagnostico}>
+                  Servidor: {API_BASE_URL || '(sin configurar)'}
+                </Text>
+              </View>
             </View>
           )}
 
@@ -143,13 +165,32 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Paleta.texto,
   },
-  cajaError: {
+  campoPassword: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: Paleta.superficie,
+    borderWidth: 1,
+    borderColor: Paleta.borde,
+    borderRadius: 14,
+    paddingRight: Spacing.three,
+  },
+  inputPassword: {
+    flex: 1,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+    fontSize: 16,
+    color: Paleta.texto,
+  },
+  ojo: { padding: Spacing.one },
+  flex: { flex: 1 },
+  cajaError: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: Spacing.two,
     paddingHorizontal: Spacing.one,
   },
-  textoError: { color: Paleta.error, fontSize: 13, flex: 1 },
+  textoError: { color: Paleta.error, fontSize: 13 },
+  textoDiagnostico: { color: Paleta.textoSuave, fontSize: 11, marginTop: 2 },
   boton: {
     backgroundColor: Paleta.primario,
     borderRadius: 14,
