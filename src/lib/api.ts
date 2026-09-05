@@ -75,12 +75,74 @@ export function login(email: string, password: string) {
   });
 }
 
+function primerValor(crudo: Record<string, unknown>, claves: string[]): unknown {
+  for (const clave of claves) {
+    const valor = crudo[clave];
+    if (valor !== undefined && valor !== null) return valor;
+  }
+  return null;
+}
+
+function comoTexto(valor: unknown): string | null {
+  if (valor === null || valor === undefined) return null;
+  return typeof valor === 'string' ? valor : String(valor);
+}
+
+function comoNumero(valor: unknown): number | null {
+  if (typeof valor === 'number') return Number.isFinite(valor) ? valor : null;
+  if (typeof valor === 'string' && valor.trim() !== '') {
+    const n = Number(valor);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function normalizarEstado(crudo: Record<string, unknown>): 'VALIDA' | 'USADA' {
+  const estado = comoTexto(primerValor(crudo, ['estado', 'status', 'state']));
+  if (estado && /usad|used/i.test(estado)) return 'USADA';
+  if (estado && /valid|disponible|activa/i.test(estado)) return 'VALIDA';
+
+  if (primerValor(crudo, ['usadaAt', 'usada_at', 'fechaEscaneo', 'fecha_escaneo'])) return 'USADA';
+  if (primerValor(crudo, ['usada', 'usado', 'used']) === true) return 'USADA';
+
+  return 'VALIDA';
+}
+
+/**
+ * El backend cambio de forma varias veces (camelCase vs snake_case, id corto vs
+ * token completo). Se normaliza en el borde para que el resto de la app trabaje
+ * siempre con la misma estructura, en vez de propagar el desajuste a SQLite.
+ */
+function normalizarTicket(crudo: Record<string, unknown>): TicketRemoto | null {
+  const id = comoTexto(primerValor(crudo, ['id', 'ticketId', 'ticket_id', 'codigo', 'code']));
+  if (!id) return null;
+
+  return {
+    id,
+    estado: normalizarEstado(crudo),
+    tipo: comoTexto(primerValor(crudo, ['tipo', 'tipoEntrada', 'tipo_entrada', 'type'])),
+    nombreComprador: comoTexto(
+      primerValor(crudo, ['nombreComprador', 'nombre_comprador', 'comprador', 'nombre'])
+    ),
+    filaAsignada: comoNumero(
+      primerValor(crudo, ['filaAsignada', 'fila_asignada', 'fila', 'row'])
+    ),
+  };
+}
+
 /** GET /api/app/sync-download -> todas las entradas del evento (mapa offline completo). */
 export async function syncDownload(token: string) {
-  const datos = await pedir<{ tickets: TicketRemoto[] } | TicketRemoto[]>('/api/app/sync-download', {
-    token,
-  });
-  return Array.isArray(datos) ? datos : datos.tickets;
+  const datos = await pedir<unknown>('/api/app/sync-download', { token });
+
+  const crudos = Array.isArray(datos)
+    ? datos
+    : ((datos as { tickets?: unknown[]; entradas?: unknown[] })?.tickets ??
+      (datos as { entradas?: unknown[] })?.entradas ??
+      []);
+
+  return crudos
+    .map((t) => normalizarTicket(t as Record<string, unknown>))
+    .filter((t): t is TicketRemoto => t !== null);
 }
 
 /** POST /api/app/sync-upload -> ids de las entradas que este guardia marco como usadas offline. */

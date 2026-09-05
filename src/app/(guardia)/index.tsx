@@ -6,7 +6,13 @@ import { useCallback, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Paleta, Spacing } from '@/constants/theme';
-import { buscarTicketPorId, contarTickets, marcarTicketUsado, muestraDeIds } from '@/lib/db';
+import {
+  buscarTicketPorCodigoParcial,
+  buscarTicketPorId,
+  contarTickets,
+  marcarTicketUsado,
+  muestraDeIds,
+} from '@/lib/db';
 import { leerQr, type LecturaQr } from '@/lib/qr';
 import type { TicketLocal } from '@/lib/types';
 import { useAuthStore } from '@/store/auth';
@@ -44,14 +50,15 @@ export default function EscanerScreen() {
   );
 
   const procesarId = useCallback(
-    async (id: string, prefijo?: string) => {
-      const ticket = await buscarTicketPorId(db, id, prefijo);
+    async (idsPosibles: string[]) => {
+      const ticket = await buscarTicketPorId(db, idsPosibles);
+      const id = idsPosibles[0];
 
       if (!ticket) {
         // Se adjunta el estado de la base local: casi siempre el problema es que
         // no se sincronizo, o que sync-download guarda los ids con otra forma.
         const [total, muestra] = await Promise.all([contarTickets(db), muestraDeIds(db)]);
-        setResultado({ tipo: 'inexistente', codigo: id, total, muestra });
+        setResultado({ tipo: 'inexistente', codigo: id ?? '(vacío)', total, muestra });
         return;
       }
 
@@ -67,7 +74,7 @@ export default function EscanerScreen() {
       }
 
       const marcado = await marcarTicketUsado(db, ticket.id);
-      const actualizado = (await buscarTicketPorId(db, ticket.id)) ?? ticket;
+      const actualizado = (await buscarTicketPorId(db, [ticket.id])) ?? ticket;
       setResultado({ tipo: marcado ? 'permitido' : 'ya_escaneada', ticket: actualizado });
     },
     [db, miNumeroDeFila]
@@ -82,20 +89,23 @@ export default function EscanerScreen() {
         setResultado({ ...lectura, tipo: 'invalido' });
         return;
       }
-      await procesarId(lectura.id, lectura.prefijo);
+      await procesarId(lectura.idsPosibles);
     } finally {
       setProcesando(false);
     }
   }
 
   async function validarManual() {
-    const id = codigoManual.trim();
-    if (!id || procesando) return;
+    const codigo = codigoManual.trim();
+    if (!codigo || procesando) return;
     setProcesando(true);
     setManualAbierto(false);
     setCodigoManual('');
     try {
-      await procesarId(id);
+      // El codigo impreso es la parte corta: se resuelve por coincidencia
+      // parcial porque el id guardado incluye la firma completa.
+      const parcial = await buscarTicketPorCodigoParcial(db, codigo);
+      await procesarId(parcial ? [parcial.id] : [codigo]);
     } finally {
       setProcesando(false);
     }

@@ -1,6 +1,13 @@
 import CryptoJS from 'crypto-js';
 
-type Extraccion = { id: string; firma: string; prefijo?: string };
+type Extraccion = {
+  /** Parte corta del codigo, sobre la que se calcula el HMAC. Ej: "CE80AE28". */
+  id: string;
+  firma: string;
+  prefijo?: string;
+  /** Token completo tal como viaja en el QR. Ej: "EVT-CE80AE28.1dd872ee9dc596d1". */
+  token?: string;
+};
 
 /** Alias de nombre de campo que distintas versiones del backend pueden usar. */
 const CLAVES_ID = ['id', 'ticketId', 'ticket_id', 'codigo', 'code'];
@@ -49,8 +56,8 @@ function extraerDeToken(dato: string): Extraccion | null {
   const contenido = pathDeUrl(dato) ?? dato;
   const match = contenido.match(/([A-Za-z]{2,10})-([A-Za-z0-9]+)[.-]([A-Za-z0-9]+)/);
   if (!match) return null;
-  const [, prefijo, id, firma] = match;
-  return { id, firma, prefijo };
+  const [token, prefijo, id, firma] = match;
+  return { id, firma, prefijo, token };
 }
 
 /** URL de validacion por query string: .../validar?id=A1B2C3D4&firma=abc123 */
@@ -122,7 +129,12 @@ function coincideFlexible(a: string, b: string) {
 }
 
 export type LecturaQr =
-  | { valido: true; id: string; prefijo?: string }
+  /**
+   * `idsPosibles` va ordenado de mas a menos probable: el backend puede guardar
+   * como id el token completo ("EVT-CE80AE28.1dd..."), el codigo corto, o el
+   * codigo con prefijo. Se prueban todos contra la base local.
+   */
+  | { valido: true; id: string; idsPosibles: string[] }
   | { valido: false; motivo: 'formato'; crudo: string }
   | { valido: false; motivo: 'sin_secreto'; id: string }
   | { valido: false; motivo: 'firma'; id: string; firmaRecibida: string; candidatos: Candidato[] };
@@ -141,7 +153,7 @@ export function leerQr(dato: string, secreto: string | null): LecturaQr {
   const extraccion = extraerIdYFirma(dato.trim());
   if (!extraccion) return { valido: false, motivo: 'formato', crudo: dato };
 
-  const { id, firma, prefijo } = extraccion;
+  const { id, firma, prefijo, token } = extraccion;
 
   // Sin secreto no se puede distinguir un QR legitimo de uno falso: se rechaza,
   // porque dar acceso seria peor que un falso negativo. Esto NO es un QR
@@ -157,5 +169,9 @@ export function leerQr(dato: string, secreto: string | null): LecturaQr {
     return { valido: false, motivo: 'firma', id, firmaRecibida: recibida, candidatos };
   }
 
-  return { valido: true, id, prefijo };
+  const idsPosibles = [token, id, idConPrefijo].filter(
+    (valor): valor is string => typeof valor === 'string' && valor.length > 0
+  );
+
+  return { valido: true, id: token ?? id, idsPosibles };
 }

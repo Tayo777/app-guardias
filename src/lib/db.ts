@@ -94,32 +94,46 @@ export async function contarTickets(db: SQLiteDatabase) {
 }
 
 /**
- * Formas alternativas del mismo id: el QR trae "F6B49CDD" pero sync-download
- * podria haber guardado "EVT-F6B49CDD" (o viceversa).
+ * Busca la entrada probando varias formas del mismo codigo, porque el id que
+ * viaja en el QR y el que devuelve sync-download no siempre son identicos
+ * (token completo vs codigo corto vs codigo con prefijo, y mayus/minus).
+ * El codigo ya viene autenticado por HMAC, asi que ampliar la busqueda no
+ * habilita nada: solo hace que encuentre la fila correcta.
  */
-function variantesDeId(id: string, prefijo?: string | null): string[] {
-  const variantes = new Set<string>([id]);
-  if (prefijo) variantes.add(`${prefijo}-${id}`);
+export function buscarTicketPorId(db: SQLiteDatabase, idsPosibles: string[]) {
+  const variantes = new Set<string>();
+  for (const id of idsPosibles) {
+    const limpio = id?.trim();
+    if (!limpio) continue;
+    variantes.add(limpio);
 
-  const sinPrefijo = id.match(/^[A-Za-z]{2,10}-(.+)$/);
-  if (sinPrefijo) variantes.add(sinPrefijo[1]);
+    const sinPrefijo = limpio.match(/^[A-Za-z]{2,10}-(.+)$/);
+    if (sinPrefijo) variantes.add(sinPrefijo[1]);
+  }
+  if (variantes.size === 0) return Promise.resolve(null);
 
-  return [...variantes];
+  const lista = [...variantes];
+  const marcadores = lista.map(() => '?').join(', ');
+  return db.getFirstAsync<TicketLocal>(
+    `SELECT * FROM tickets WHERE id COLLATE NOCASE IN (${marcadores}) LIMIT 1`,
+    lista
+  );
 }
 
 /**
- * Busca la entrada tolerando diferencias de forma entre el id que viaja en el
- * QR y el que devolvio sync-download: mayusculas/minusculas y el prefijo del
- * evento. El id ya viene autenticado por HMAC, asi que ampliar la busqueda no
- * habilita nada: solo hace que encuentre la fila correcta.
+ * Carga manual: el guardia lee el codigo corto impreso en la entrada y no puede
+ * tipear la firma completa, asi que se busca por coincidencia parcial. Solo se
+ * acepta si matchea UNA sola entrada, para no validar la equivocada.
  */
-export function buscarTicketPorId(db: SQLiteDatabase, id: string, prefijo?: string | null) {
-  const variantes = variantesDeId(id, prefijo);
-  const marcadores = variantes.map(() => '?').join(', ');
-  return db.getFirstAsync<TicketLocal>(
-    `SELECT * FROM tickets WHERE id COLLATE NOCASE IN (${marcadores}) LIMIT 1`,
-    variantes
+export async function buscarTicketPorCodigoParcial(db: SQLiteDatabase, codigo: string) {
+  const limpio = codigo.trim();
+  if (limpio.length < 4) return null;
+
+  const filas = await db.getAllAsync<TicketLocal>(
+    `SELECT * FROM tickets WHERE id LIKE ? COLLATE NOCASE LIMIT 2`,
+    [`%${limpio}%`]
   );
+  return filas.length === 1 ? filas[0] : null;
 }
 
 /** Ids de ejemplo de la base local, para diagnosticar desajustes de formato. */
@@ -172,6 +186,8 @@ export type Resumen = {
   pendientes: number;
   mi_fila_total: number;
   mi_fila_usadas: number;
+  /** Entradas que llegaron sin fila asignada desde el backend. */
+  sin_fila: number;
   ultima_descarga: string | null;
 };
 
@@ -182,7 +198,8 @@ export async function obtenerResumen(db: SQLiteDatabase, fila: number): Promise<
        COALESCE(SUM(CASE WHEN estado = 'USADA' THEN 1 ELSE 0 END), 0) AS usadas,
        COALESCE(SUM(pendiente_sync), 0) AS pendientes,
        COALESCE(SUM(CASE WHEN fila_asignada = ? THEN 1 ELSE 0 END), 0) AS mi_fila_total,
-       COALESCE(SUM(CASE WHEN fila_asignada = ? AND estado = 'USADA' THEN 1 ELSE 0 END), 0) AS mi_fila_usadas
+       COALESCE(SUM(CASE WHEN fila_asignada = ? AND estado = 'USADA' THEN 1 ELSE 0 END), 0) AS mi_fila_usadas,
+       COALESCE(SUM(CASE WHEN fila_asignada IS NULL THEN 1 ELSE 0 END), 0) AS sin_fila
      FROM tickets`,
     [fila, fila]
   );
@@ -197,6 +214,7 @@ export async function obtenerResumen(db: SQLiteDatabase, fila: number): Promise<
     pendientes: conteos?.pendientes ?? 0,
     mi_fila_total: conteos?.mi_fila_total ?? 0,
     mi_fila_usadas: conteos?.mi_fila_usadas ?? 0,
+    sin_fila: conteos?.sin_fila ?? 0,
     ultima_descarga: meta?.valor ?? null,
   };
 }

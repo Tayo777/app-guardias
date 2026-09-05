@@ -104,6 +104,9 @@ export default function MiFilaScreen() {
           valor={`${resumen?.mi_fila_usadas ?? 0} / ${resumen?.mi_fila_total ?? 0}`}
         />
         <Dato etiqueta="Entradas del evento" valor={resumen?.total ?? 0} />
+        {(resumen?.sin_fila ?? 0) > 0 && (
+          <Dato etiqueta="Sin fila asignada" valor={resumen?.sin_fila ?? 0} resaltado />
+        )}
         <Dato
           etiqueta="Escaneos sin subir"
           valor={resumen?.pendientes ?? 0}
@@ -180,7 +183,9 @@ export default function MiFilaScreen() {
         <Text style={styles.vacio}>
           {busqueda
             ? 'Sin resultados para esa búsqueda.'
-            : 'No hay entradas asignadas a tu fila. Probá sincronizar.'}
+            : (resumen?.sin_fila ?? 0) > 0
+              ? `Hay ${resumen?.sin_fila} entradas descargadas pero ninguna tiene fila asignada. El organizador todavía no repartió las filas en el panel web.`
+              : 'No hay entradas asignadas a tu fila. Probá sincronizar.'}
         </Text>
       }
     />
