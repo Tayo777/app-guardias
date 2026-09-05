@@ -122,7 +122,7 @@ function coincideFlexible(a: string, b: string) {
 }
 
 export type LecturaQr =
-  | { valido: true; id: string }
+  | { valido: true; id: string; prefijo?: string }
   | { valido: false; motivo: 'formato'; crudo: string }
   | { valido: false; motivo: 'sin_secreto'; id: string }
   | { valido: false; motivo: 'firma'; id: string; firmaRecibida: string; candidatos: Candidato[] };
@@ -157,5 +157,5 @@ export function leerQr(dato: string, secreto: string | null): LecturaQr {
     return { valido: false, motivo: 'firma', id, firmaRecibida: recibida, candidatos };
   }
 
-  return { valido: true, id };
+  return { valido: true, id, prefijo };
 }

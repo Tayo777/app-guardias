@@ -93,8 +93,42 @@ export async function contarTickets(db: SQLiteDatabase) {
   return fila?.n ?? 0;
 }
 
-export function buscarTicketPorId(db: SQLiteDatabase, id: string) {
-  return db.getFirstAsync<TicketLocal>('SELECT * FROM tickets WHERE id = ?', [id]);
+/**
+ * Formas alternativas del mismo id: el QR trae "F6B49CDD" pero sync-download
+ * podria haber guardado "EVT-F6B49CDD" (o viceversa).
+ */
+function variantesDeId(id: string, prefijo?: string | null): string[] {
+  const variantes = new Set<string>([id]);
+  if (prefijo) variantes.add(`${prefijo}-${id}`);
+
+  const sinPrefijo = id.match(/^[A-Za-z]{2,10}-(.+)$/);
+  if (sinPrefijo) variantes.add(sinPrefijo[1]);
+
+  return [...variantes];
+}
+
+/**
+ * Busca la entrada tolerando diferencias de forma entre el id que viaja en el
+ * QR y el que devolvio sync-download: mayusculas/minusculas y el prefijo del
+ * evento. El id ya viene autenticado por HMAC, asi que ampliar la busqueda no
+ * habilita nada: solo hace que encuentre la fila correcta.
+ */
+export function buscarTicketPorId(db: SQLiteDatabase, id: string, prefijo?: string | null) {
+  const variantes = variantesDeId(id, prefijo);
+  const marcadores = variantes.map(() => '?').join(', ');
+  return db.getFirstAsync<TicketLocal>(
+    `SELECT * FROM tickets WHERE id COLLATE NOCASE IN (${marcadores}) LIMIT 1`,
+    variantes
+  );
+}
+
+/** Ids de ejemplo de la base local, para diagnosticar desajustes de formato. */
+export async function muestraDeIds(db: SQLiteDatabase, limite = 5) {
+  const filas = await db.getAllAsync<{ id: string }>(
+    'SELECT id FROM tickets ORDER BY id LIMIT ?',
+    [limite]
+  );
+  return filas.map((f) => f.id);
 }
 
 /** Entradas de una fila, filtradas por nombre del comprador o numero de entrada. */

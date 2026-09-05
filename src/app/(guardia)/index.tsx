@@ -6,7 +6,7 @@ import { useCallback, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Paleta, Spacing } from '@/constants/theme';
-import { buscarTicketPorId, contarTickets, marcarTicketUsado } from '@/lib/db';
+import { buscarTicketPorId, contarTickets, marcarTicketUsado, muestraDeIds } from '@/lib/db';
 import { leerQr, type LecturaQr } from '@/lib/qr';
 import type { TicketLocal } from '@/lib/types';
 import { useAuthStore } from '@/store/auth';
@@ -15,7 +15,7 @@ type Resultado =
   | { tipo: 'permitido'; ticket: TicketLocal }
   | { tipo: 'ya_escaneada'; ticket: TicketLocal }
   | { tipo: 'otra_fila'; ticket: TicketLocal }
-  | { tipo: 'inexistente'; codigo: string }
+  | { tipo: 'inexistente'; codigo: string; total: number; muestra: string[] }
   | (Extract<LecturaQr, { valido: false }> & { tipo: 'invalido' });
 
 export default function EscanerScreen() {
@@ -44,11 +44,14 @@ export default function EscanerScreen() {
   );
 
   const procesarId = useCallback(
-    async (id: string) => {
-      const ticket = await buscarTicketPorId(db, id);
+    async (id: string, prefijo?: string) => {
+      const ticket = await buscarTicketPorId(db, id, prefijo);
 
       if (!ticket) {
-        setResultado({ tipo: 'inexistente', codigo: id });
+        // Se adjunta el estado de la base local: casi siempre el problema es que
+        // no se sincronizo, o que sync-download guarda los ids con otra forma.
+        const [total, muestra] = await Promise.all([contarTickets(db), muestraDeIds(db)]);
+        setResultado({ tipo: 'inexistente', codigo: id, total, muestra });
         return;
       }
 
@@ -79,7 +82,7 @@ export default function EscanerScreen() {
         setResultado({ ...lectura, tipo: 'invalido' });
         return;
       }
-      await procesarId(lectura.id);
+      await procesarId(lectura.id, lectura.prefijo);
     } finally {
       setProcesando(false);
     }
@@ -338,9 +341,14 @@ function PantallaResultado({
         )}
 
         {resultado.tipo === 'inexistente' && (
-          <Text style={styles.overlayTexto}>
-            El código {resultado.codigo} no pertenece a este evento.
-          </Text>
+          <View style={styles.overlayDetalle}>
+            <Text style={styles.overlayTexto}>
+              {resultado.total === 0
+                ? 'No hay entradas descargadas en este teléfono. Andá a Mi Fila y tocá Sincronizar.'
+                : `El código ${resultado.codigo} no está entre las ${resultado.total} entradas descargadas.`}
+            </Text>
+            <PanelTecnico resultado={resultado} />
+          </View>
         )}
       </View>
 
@@ -356,7 +364,11 @@ function PantallaResultado({
  * secreto: id leido, y para "firma" ambos hashes completos (Hex-SHA256) para
  * compararlos caracter a caracter con lo que firma el backend.
  */
-function PanelTecnico({ resultado }: { resultado: Extract<Resultado, { tipo: 'invalido' }> }) {
+function PanelTecnico({
+  resultado,
+}: {
+  resultado: Extract<Resultado, { tipo: 'invalido' | 'inexistente' }>;
+}) {
   const [abierto, setAbierto] = useState(false);
 
   return (
@@ -369,13 +381,28 @@ function PanelTecnico({ resultado }: { resultado: Extract<Resultado, { tipo: 'in
 
       {abierto && (
         <View style={styles.panelTecnicoContenido}>
-          {resultado.motivo === 'formato' && (
+          {resultado.tipo === 'inexistente' && (
+            <>
+              <FilaTecnica etiqueta="id buscado" valor={resultado.codigo} />
+              <FilaTecnica etiqueta="entradas en la base local" valor={String(resultado.total)} />
+              <Text style={styles.etiquetaTecnica}>Ids que sí están guardados (muestra)</Text>
+              {resultado.muestra.length === 0 ? (
+                <FilaTecnica etiqueta="(ninguno)" valor="base vacía" />
+              ) : (
+                resultado.muestra.map((id) => (
+                  <FilaTecnica key={id} etiqueta="id guardado" valor={id} />
+                ))
+              )}
+            </>
+          )}
+
+          {resultado.tipo === 'invalido' && resultado.motivo === 'formato' && (
             <FilaTecnica etiqueta="Contenido crudo del QR" valor={resultado.crudo} />
           )}
-          {resultado.motivo === 'sin_secreto' && (
+          {resultado.tipo === 'invalido' && resultado.motivo === 'sin_secreto' && (
             <FilaTecnica etiqueta="id leído" valor={resultado.id} />
           )}
-          {resultado.motivo === 'firma' && (
+          {resultado.tipo === 'invalido' && resultado.motivo === 'firma' && (
             <>
               <FilaTecnica etiqueta="id leído" valor={resultado.id} />
               <FilaTecnica etiqueta="firma del QR" valor={resultado.firmaRecibida} />
