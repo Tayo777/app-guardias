@@ -15,7 +15,7 @@ import {
 import { MaxContentWidth, Paleta, Spacing } from '@/constants/theme';
 import { buscarTicketsDeFila, obtenerResumen, type Resumen } from '@/lib/db';
 import { descargarEntradas, sincronizarTodo } from '@/lib/sync';
-import type { TicketLocal } from '@/lib/types';
+import { nombreParaMostrar, type TicketLocal } from '@/lib/types';
 import { actualizacionesHabilitadas, verificarActualizaciones } from '@/lib/updates';
 import { useAuthStore } from '@/store/auth';
 
@@ -203,7 +203,7 @@ function FilaTicket({ ticket }: { ticket: TicketLocal }) {
   return (
     <View style={styles.item}>
       <View style={styles.flex}>
-        <Text style={styles.itemNombre}>{ticket.nombre_comprador ?? 'Sin nombre'}</Text>
+        <Text style={styles.itemNombre}>{nombreParaMostrar(ticket)}</Text>
         <Text style={styles.itemDetalle}>
           #{ticket.id}
           {ticket.tipo ? `  ·  ${ticket.tipo}` : ''}

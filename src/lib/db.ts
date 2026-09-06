@@ -58,8 +58,12 @@ export async function migrarBaseDeDatos(db: SQLiteDatabase) {
 export async function guardarDescarga(db: SQLiteDatabase, tickets: TicketRemoto[]) {
   await db.withTransactionAsync(async () => {
     for (const ticket of tickets) {
-      // Si el ticket tiene un escaneo local sin subir, el estado local gana:
-      // todavia no llego al backend y pisarlo dejaria pasar dos veces la entrada.
+      // El estado local es monotonico: una vez USADA, una descarga nunca la
+      // vuelve a poner VALIDA. Sin esto, subir un escaneo y volver a descargar
+      // enseguida (como hace sincronizarTodo) podia pisar el USADA recien
+      // confirmado con datos del servidor que todavia no lo reflejaban
+      // (lag de un instante entre sync-upload y que sync-download lo vea) y
+      // el guardia perdia el escaneo aunque el backend lo hubiera aceptado.
       await db.runAsync(
         `INSERT INTO tickets (id, estado, tipo, nombre_comprador, fila_asignada, busqueda)
          VALUES (?, ?, ?, ?, ?, ?)
@@ -68,7 +72,7 @@ export async function guardarDescarga(db: SQLiteDatabase, tickets: TicketRemoto[
            nombre_comprador = excluded.nombre_comprador,
            fila_asignada = excluded.fila_asignada,
            busqueda = excluded.busqueda,
-           estado = CASE WHEN tickets.pendiente_sync = 1 THEN tickets.estado ELSE excluded.estado END`,
+           estado = CASE WHEN tickets.estado = 'USADA' THEN 'USADA' ELSE excluded.estado END`,
         [
           ticket.id,
           ticket.estado,

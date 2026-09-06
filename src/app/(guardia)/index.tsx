@@ -14,7 +14,7 @@ import {
   muestraDeIds,
 } from '@/lib/db';
 import { leerQr, type LecturaQr } from '@/lib/qr';
-import type { TicketLocal } from '@/lib/types';
+import { nombreParaMostrar, type TicketLocal } from '@/lib/types';
 import { useAuthStore } from '@/store/auth';
 
 type Resultado =
@@ -300,7 +300,7 @@ function PantallaResultado({
           <View style={styles.overlayDetalle}>
             <Text style={styles.overlayTipo}>{resultado.ticket.tipo ?? 'Entrada general'}</Text>
             <Text style={styles.overlayNombre}>
-              {resultado.ticket.nombre_comprador ?? 'Sin nombre'}
+              {nombreParaMostrar(resultado.ticket)}
             </Text>
           </View>
         )}
@@ -309,7 +309,7 @@ function PantallaResultado({
           <View style={styles.overlayDetalle}>
             <Text style={styles.overlaySubtitulo}>RECHAZAR</Text>
             <Text style={styles.overlayNombre}>
-              {resultado.ticket.nombre_comprador ?? 'Sin nombre'}
+              {nombreParaMostrar(resultado.ticket)}
             </Text>
             {resultado.ticket.usada_at && (
               <Text style={styles.overlayTexto}>
