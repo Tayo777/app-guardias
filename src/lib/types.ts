@@ -23,6 +23,10 @@ export type TicketRemoto = {
   tipo: string | null;
   nombreComprador: string | null;
   filaAsignada: number | null;
+  dni: string | null;
+  email: string | null;
+  /** ISO date de cuando se compro/genero la entrada (no cuando se escaneo). */
+  fechaCompra: string | null;
 };
 
 /** Ticket tal como vive en la base SQLite del telefono (snake_case). */
@@ -32,6 +36,9 @@ export type TicketLocal = {
   tipo: string | null;
   nombre_comprador: string | null;
   fila_asignada: number | null;
+  dni: string | null;
+  email: string | null;
+  fecha_compra: string | null;
   /** ISO date del momento en que se escaneo en este dispositivo. */
   usada_at: string | null;
   /** 1 = escaneado local todavia no subido al backend. */

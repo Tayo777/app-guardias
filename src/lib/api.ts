@@ -127,6 +127,19 @@ function normalizarTicket(crudo: Record<string, unknown>): TicketRemoto | null {
     filaAsignada: comoNumero(
       primerValor(crudo, ['filaAsignada', 'fila_asignada', 'fila', 'row'])
     ),
+    dni: comoTexto(primerValor(crudo, ['dni', 'documento', 'doc', 'nroDocumento', 'nro_documento'])),
+    email: comoTexto(primerValor(crudo, ['email', 'mail', 'correo'])),
+    fechaCompra: comoTexto(
+      primerValor(crudo, [
+        'fechaCompra',
+        'fecha_compra',
+        'fechaDeCompra',
+        'createdAt',
+        'created_at',
+        'fechaCreacion',
+        'fecha_creacion',
+      ])
+    ),
   };
 }
 

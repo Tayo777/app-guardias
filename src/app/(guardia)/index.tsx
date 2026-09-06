@@ -299,9 +299,8 @@ function PantallaResultado({
         {resultado.tipo === 'permitido' && (
           <View style={styles.overlayDetalle}>
             <Text style={styles.overlayTipo}>{resultado.ticket.tipo ?? 'Entrada general'}</Text>
-            <Text style={styles.overlayNombre}>
-              {nombreParaMostrar(resultado.ticket)}
-            </Text>
+            <Text style={styles.overlayNombre}>{nombreParaMostrar(resultado.ticket)}</Text>
+            <FichaTicket ticket={resultado.ticket} />
           </View>
         )}
 
@@ -365,6 +364,40 @@ function PantallaResultado({
       <Pressable accessibilityRole="button" onPress={onCerrar} style={styles.botonSiguiente}>
         <Text style={styles.textoBotonSiguiente}>Escanear siguiente</Text>
       </Pressable>
+    </View>
+  );
+}
+
+/**
+ * Ficha completa del ticket en la pantalla de acceso permitido: el guardia
+ * necesita ver DNI/email a simple vista, sin tocar nada, con la fila
+ * escaneando gente en tiempo real. Solo se listan los campos que el backend
+ * mando (si dni/email vienen null no se inventa una fila vacia).
+ */
+function FichaTicket({ ticket }: { ticket: TicketLocal }) {
+  const filas: { etiqueta: string; valor: string }[] = [];
+
+  if (ticket.dni) filas.push({ etiqueta: 'DNI', valor: ticket.dni });
+  if (ticket.email) filas.push({ etiqueta: 'Email', valor: ticket.email });
+  if (ticket.fila_asignada !== null) {
+    filas.push({ etiqueta: 'Fila', valor: String(ticket.fila_asignada) });
+  }
+  if (ticket.fecha_compra) {
+    filas.push({ etiqueta: 'Compra', valor: new Date(ticket.fecha_compra).toLocaleString() });
+  }
+
+  if (filas.length === 0) return null;
+
+  return (
+    <View style={styles.fichaTicket}>
+      {filas.map((f) => (
+        <View key={f.etiqueta} style={styles.fichaFila}>
+          <Text style={styles.fichaEtiqueta}>{f.etiqueta}</Text>
+          <Text style={styles.fichaValor} numberOfLines={1}>
+            {f.valor}
+          </Text>
+        </View>
+      ))}
     </View>
   );
 }
@@ -530,6 +563,18 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   overlayNombre: { color: '#ffffff', fontSize: 26, fontWeight: '700', textAlign: 'center' },
+  fichaTicket: {
+    marginTop: Spacing.two,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    borderRadius: 14,
+    padding: Spacing.three,
+    gap: Spacing.two,
+    width: '100%',
+    maxWidth: 320,
+  },
+  fichaFila: { flexDirection: 'row', justifyContent: 'space-between', gap: Spacing.three },
+  fichaEtiqueta: { color: 'rgba(255,255,255,0.75)', fontSize: 13, fontWeight: '700' },
+  fichaValor: { color: '#ffffff', fontSize: 13, flexShrink: 1, textAlign: 'right' },
   overlayTexto: { color: 'rgba(255,255,255,0.9)', fontSize: 16, textAlign: 'center' },
   insigniaFila: {
     backgroundColor: '#1d4ed8',

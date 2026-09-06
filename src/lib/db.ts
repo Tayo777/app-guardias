@@ -2,7 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import type { TicketLocal, TicketRemoto } from '@/lib/types';
 
-const VERSION_ESQUEMA = 3;
+const VERSION_ESQUEMA = 4;
 
 /**
  * LIKE de SQLite no ignora acentos ni mayusculas fuera de ASCII: buscar "perez"
@@ -38,6 +38,9 @@ export async function migrarBaseDeDatos(db: SQLiteDatabase) {
       tipo TEXT,
       nombre_comprador TEXT,
       fila_asignada INTEGER,
+      dni TEXT,
+      email TEXT,
+      fecha_compra TEXT,
       usada_at TEXT,
       pendiente_sync INTEGER NOT NULL DEFAULT 0,
       busqueda TEXT
@@ -65,12 +68,15 @@ export async function guardarDescarga(db: SQLiteDatabase, tickets: TicketRemoto[
       // (lag de un instante entre sync-upload y que sync-download lo vea) y
       // el guardia perdia el escaneo aunque el backend lo hubiera aceptado.
       await db.runAsync(
-        `INSERT INTO tickets (id, estado, tipo, nombre_comprador, fila_asignada, busqueda)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO tickets (id, estado, tipo, nombre_comprador, fila_asignada, dni, email, fecha_compra, busqueda)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            tipo = excluded.tipo,
            nombre_comprador = excluded.nombre_comprador,
            fila_asignada = excluded.fila_asignada,
+           dni = excluded.dni,
+           email = excluded.email,
+           fecha_compra = excluded.fecha_compra,
            busqueda = excluded.busqueda,
            estado = CASE WHEN tickets.estado = 'USADA' THEN 'USADA' ELSE excluded.estado END`,
         [
@@ -79,6 +85,9 @@ export async function guardarDescarga(db: SQLiteDatabase, tickets: TicketRemoto[
           ticket.tipo,
           ticket.nombreComprador,
           ticket.filaAsignada,
+          ticket.dni,
+          ticket.email,
+          ticket.fechaCompra,
           textoBusqueda(ticket),
         ]
       );
